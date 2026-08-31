@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
@@ -394,6 +394,26 @@ async def delete_data(category: str):
 async def get_weeks():
     return {"weeks": list(app_state['plannings'].keys())}
 
+@app.get("/api/generated")
+async def get_generated():
+    med_list = app_state.get('medical_list')
+    if med_list is None: return {"data": []}
+    planned = med_list[med_list['Statut Visite'] == 'Planifié'].copy()
+    planned['Date Visite'] = planned['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
+    planned['Créneau Visite'] = planned['Créneau Visite'].dt.strftime('%H:%M').fillna('')
+    return {"data": clean_for_json(planned[['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])}
+
+@app.post("/api/unplan")
+async def unplan_all():
+    med_list = app_state.get('medical_list')
+    if med_list is not None:
+        med_list.loc[med_list['Statut Visite'] == 'Planifié', 'Statut Visite'] = 'Non Planifié'
+        med_list.loc[med_list['Statut Visite'] == 'Non Planifié', 'Date Visite'] = pd.NaT
+        med_list.loc[med_list['Statut Visite'] == 'Non Planifié', 'Créneau Visite'] = pd.NaT
+        app_state['medical_list'] = med_list
+        save_history()
+    return {"message": "Planifications effacées."}
+
 @app.post("/api/generate")
 async def generate_planning(config: str = Form(...)):
     try:
@@ -600,3 +620,32 @@ async def get_dashboard():
         done_df['Statut visite'] = 'Done'
         done_visites = clean_for_json(done_df[['WORKDAY ID', 'Payroll ID', 'Nom complet', 'Projet', 'Statut visite']])
     return {"metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}}
+
+@app.get("/api/export/{category}")
+async def export_data(category: str):
+    df = None
+    if category == 'planning':
+        if app_state['plannings']:
+            df = list(app_state['plannings'].values())[0]
+    elif category == 'collab': df = app_state.get('medical_list')
+    elif category == 'suivi': df = app_state.get('rta_data')
+    elif category == 'absences':
+        rta_data = app_state.get('rta_data')
+        if rta_data is not None:
+            mask = rta_data['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | rta_data['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
+            df = rta_data[mask].copy()
+    elif category == 'done_visites':
+        rta_data = app_state.get('rta_data')
+        if rta_data is not None:
+            df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
+    elif category == 'generated':
+        med_list = app_state.get('medical_list')
+        if med_list is not None: df = med_list[med_list['Statut Visite'] == 'Planifié'].copy()
+
+    if df is None or df.empty: return {"error": "Aucune donnée à exporter"}
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+    output.seek(0)
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={category}.xlsx"})
