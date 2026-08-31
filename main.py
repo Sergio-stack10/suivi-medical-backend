@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Optional
 import pandas as pd
 import numpy as np
 import datetime
@@ -28,13 +28,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-
-# --- MÉMOIRE ET SAUVEGARDE PERMANENTE (MongoDB) ---
-app_state = {
-    'plannings': {},
-    'medical_list': None,
-    'rta_data': None
-}
+app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None}
 
 def get_mongo_client():
     mongo_uri = os.environ.get("MONGO_URI")
@@ -54,13 +48,11 @@ def load_history():
                 with open("app_state.pkl", "rb") as f: app_state = pickle.load(f)
             except: pass
         return
-    
     try:
         db = client["visite_medicale_db"]
         collection = db["app_state"]
         doc = collection.find_one({"_id": 1})
-        if doc:
-            app_state = pickle.loads(doc['data'])
+        if doc: app_state = pickle.loads(doc['data'])
     except: pass
 
 def save_history():
@@ -81,12 +73,8 @@ load_history()
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    with open(os.path.join("static", "index.html")) as f:
-        return f.read()
+    with open(os.path.join("static", "index.html")) as f: return f.read()
 
-# ==========================================
-# FONCTIONS UTILITAIRES
-# ==========================================
 def get_excel_engine(filename: str):
     if filename.endswith('.xlsb'): return 'pyxlsb'
     elif filename.endswith('.xls'): return 'xlrd'
@@ -202,15 +190,11 @@ def format_duration(mins):
     m = int(mins % 60)
     return f"{h}h {m}min" if h > 0 else f"{m}min"
 
-# ==========================================
-# FONCTIONS DE TRAITEMENT EXCEL
-# ==========================================
 def parse_planning(files_data: list):
     all_planning = []
     for filename, content in files_data:
         engine = get_excel_engine(filename)
-        try:
-            xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+        try: xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
         except: continue
 
         df = None
@@ -329,11 +313,8 @@ def parse_rta_file(filename: str, content: bytes):
     if 'WORKDAY ID' in df.columns: df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
     return df
 
-# ==========================================
-# API ENDPOINTS
-# ==========================================
 @app.post("/api/import")
-async def import_files(files: List[UploadFile] = File(...), category: str = Form(...)):
+async def import_files(files: List[UploadFile] = File(...), category: str = Form(...), week_name: str = Form(None)):
     try:
         files_data = []
         for f in files:
@@ -342,12 +323,12 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
 
         if category == 'planning':
             df = parse_planning(files_data)
-            week_name = files_data[0][0].split('.')[0]
-            app_state['plannings'][week_name] = df
+            wk_name = week_name if week_name else files_data[0][0].split('.')[0]
+            app_state['plannings'][wk_name] = df
             save_history()
             
             display_df = df.copy()
-            dates_map = get_dates_from_week(week_name)
+            dates_map = get_dates_from_week(wk_name)
             rename_map = {}
             for j in jours:
                 d_str = dates_map[j].strftime('%d/%m/%Y')
@@ -380,8 +361,6 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
         elif category == 'suivi':
             df = parse_rta_file(files_data[0][0], files_data[0][1])
             if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
-            
-            # Mise à jour de la liste médicale avec les statuts du RTA
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
                 for _, rta_row in df.iterrows():
@@ -389,14 +368,12 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
                     if wid and wid in med_list['WORKDAY ID'].values:
                         com = str(rta_row.get('Commentaire', '')).lower()
                         statut_rta = str(rta_row.get('Statut Visite', '')).lower()
-                        if 'ok' in com:
-                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Visite Faite'
+                        if 'ok' in com: med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Visite Faite'
                         elif 'absent' in com or 'report' in com or 'absent' in statut_rta or 'report' in statut_rta:
                             med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Absent/Reporté'
                             med_list.loc[med_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.NaT
                             med_list.loc[med_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.NaT
                 app_state['medical_list'] = med_list
-
             app_state['rta_data'] = df
             save_history()
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
@@ -404,6 +381,14 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
     except Exception as e:
         print("ERREUR BACKEND:", traceback.format_exc())
         return {"message": f"❌ Erreur Python: {str(e)}"}
+
+@app.delete("/api/delete/{category}")
+async def delete_data(category: str):
+    if category == 'planning': app_state['plannings'] = {}
+    elif category == 'collab': app_state['medical_list'] = None
+    elif category == 'suivi': app_state['rta_data'] = None
+    save_history()
+    return {"message": "Données supprimées avec succès."}
 
 @app.get("/api/weeks")
 async def get_weeks():
@@ -416,11 +401,8 @@ async def generate_planning(config: str = Form(...)):
         medical_list = app_state['medical_list'].copy()
         current_week = config['week']
         current_planning = app_state['plannings'].get(current_week)
-        
-        if medical_list is None or current_planning is None:
-            return {"message": "❌ Erreur: Liste ou planning manquant."}
+        if medical_list is None or current_planning is None: return {"message": "❌ Erreur: Liste ou planning manquant."}
             
-        # 1. Remettre les absents dans le bain pour replanification
         if app_state.get('rta_data') is not None:
             rta_df = app_state['rta_data']
             if 'Commentaire' in rta_df.columns:
@@ -468,10 +450,7 @@ async def generate_planning(config: str = Form(...)):
             
             if day_config['statut_filter'] != "Tous":
                 working_df = working_df[working_df['Statut'].astype(str).str.upper() == day_config['statut_filter'].upper()]
-            
-            # 2. Exclure ceux déjà planifiés ou visités
             working_df = working_df[~working_df['Statut Visite'].isin(['Planifié', 'Visite Faite'])]
-            
             working_df['_is_replan'] = working_df['Statut Visite'].astype(str).str.lower().eq('absent/reporté')
             
             if day_config['prio'] != "Aucune priorité" and 'Priorité Visite' in working_df.columns:
@@ -526,7 +505,6 @@ async def generate_planning(config: str = Form(...)):
             
         app_state['medical_list'] = medical_list
         save_history()
-        
         start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
         end_date = start_date + datetime.timedelta(days=6)
         planned_this_week = medical_list[
@@ -534,11 +512,7 @@ async def generate_planning(config: str = Form(...)):
             (pd.to_datetime(medical_list['Date Visite'], errors='coerce') >= pd.Timestamp(start_date)) & 
             (pd.to_datetime(medical_list['Date Visite'], errors='coerce') <= pd.Timestamp(end_date))
         ].copy()
-        
-        return {
-            "message": f"✅ {total_planned} collaborateurs planifiés !",
-            "data": clean_for_json(planned_this_week[['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])
-        }
+        return {"message": f"✅ {total_planned} collaborateurs planifiés !", "data": clean_for_json(planned_this_week[['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])}
     except Exception as e:
         print("ERREUR GÉNÉRATION:", traceback.format_exc())
         return {"message": f"❌ Erreur génération: {str(e)}"}
@@ -546,64 +520,42 @@ async def generate_planning(config: str = Form(...)):
 @app.get("/api/absences")
 async def get_absences():
     rta_data = app_state.get('rta_data')
-    if rta_data is None or rta_data.empty:
-        return {"data": []}
+    if rta_data is None or rta_data.empty: return {"data": []}
     df = rta_data.copy()
     if 'Statut Visite' not in df.columns: df['Statut Visite'] = ''
     if 'Commentaire' not in df.columns: df['Commentaire'] = ''
-    mask = df['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | \
-                   df['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
+    mask = df['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | df['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
     abs_df = df[mask].copy()
-    if 'Nom' in abs_df.columns and 'Prénom' in abs_df.columns:
-        abs_df['Nom complet'] = abs_df['Nom'].fillna('').astype(str) + ' ' + abs_df['Prénom'].fillna('').astype(str)
+    if 'Nom' in abs_df.columns and 'Prénom' in abs_df.columns: abs_df['Nom complet'] = abs_df['Nom'].fillna('').astype(str) + ' ' + abs_df['Prénom'].fillna('').astype(str)
     else: abs_df['Nom complet'] = ''
     show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Commentaire']
     show_cols = [c for c in show_cols if c in abs_df.columns]
-    if 'Date Visite' in abs_df.columns:
-        abs_df['Date Visite'] = pd.to_datetime(abs_df['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+    if 'Date Visite' in abs_df.columns: abs_df['Date Visite'] = pd.to_datetime(abs_df['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
     return {"data": clean_for_json(abs_df[show_cols])}
 
 @app.get("/api/dashboard")
 async def get_dashboard():
     rta_data = app_state.get('rta_data')
-    if rta_data is None or rta_data.empty:
-        return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
-    
+    if rta_data is None or rta_data.empty: return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
     med_df = rta_data.copy()
-    
     if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
         med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
         med_df['Heure Retour'] = pd.to_datetime(med_df['Heure Retour'].astype(str), errors='coerce')
         med_df['Durée (min)'] = (med_df['Heure Retour'] - med_df['Heure Départ']).dt.total_seconds() / 60
         med_df.loc[med_df['Durée (min)'] < 0, 'Durée (min)'] = np.nan 
-    else:
-        med_df['Durée (min)'] = np.nan
-        
-    if 'Projet' in med_df.columns:
-        med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
-    else:
-        med_df['Projet_Affichage'] = 'N/A'
-        
+    else: med_df['Durée (min)'] = np.nan
+    if 'Projet' in med_df.columns: med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
+    else: med_df['Projet_Affichage'] = 'N/A'
     for col in ['Statut Visite', 'Commentaire', 'Nom', 'Prénom', 'Date Visite']:
         if col not in med_df.columns: med_df[col] = ''
-        
     med_df['Graph Status'] = med_df.apply(get_final_status, axis=1)
-    
     total_a_passer = len(med_df)
     condition_fait = med_df['Graph Status'] == 'Visite effectuée'
     condition_abs = med_df['Graph Status'] == 'Absent/Reporté'
     total_fait = len(med_df[condition_fait])
     total_planifie = len(med_df[med_df['Statut Visite'].astype(str).str.lower().isin(['planifié', 'planifie'])])
     total_absent = len(med_df[condition_abs])
-    
-    metrics = {
-        "total_a_passer": total_a_passer,
-        "total_fait": total_fait,
-        "total_planifie": total_planifie,
-        "total_absent": total_absent,
-        "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
-    }
-    
+    metrics = {"total_a_passer": total_a_passer, "total_fait": total_fait, "total_planifie": total_planifie, "total_absent": total_absent, "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"}
     chart1_data = []
     chart2_data = []
     if not med_df.empty:
@@ -614,10 +566,7 @@ async def get_dashboard():
             if col not in counts_df.columns: counts_df[col] = 0
         counts_df['Total'] = counts_df['Planifié'] + counts_df['Non Planifié']
         counts_df = counts_df.sort_values('Total', ascending=False)
-        
-        for _, row in counts_df.iterrows():
-            chart1_data.append({"project": str(row['Projet_Affichage']), "total": int(row['Total']), "planifie": int(row['Planifié'])})
-            
+        for _, row in counts_df.iterrows(): chart1_data.append({"project": str(row['Projet_Affichage']), "total": int(row['Total']), "planifie": int(row['Planifié'])})
         project_order = med_df['Projet_Affichage'].value_counts().index.tolist()
         for proj in project_order:
             proj_df = med_df[med_df['Projet_Affichage'] == proj]
@@ -625,15 +574,8 @@ async def get_dashboard():
             com_lower = proj_df['Commentaire'].astype(str).str.lower()
             faite_count = len(proj_df[com_lower.str.contains('ok', na=False)])
             abs_count = len(proj_df[com_lower.str.contains('absent|report', na=False)])
-            if planifie_count + faite_count + abs_count > 0:
-                chart2_data.append({"project": proj, "planifie": planifie_count, "faite": faite_count, "absent": abs_count})
-
-    chart3_data = {
-        "effectuee": total_fait,
-        "reste": max(0, total_planifie - total_fait),
-        "non_planifie": max(0, total_a_passer - total_planifie)
-    }
-
+            if planifie_count + faite_count + abs_count > 0: chart2_data.append({"project": proj, "planifie": planifie_count, "faite": faite_count, "absent": abs_count})
+    chart3_data = {"effectuee": total_fait, "reste": max(0, total_planifie - total_fait), "non_planifie": max(0, total_a_passer - total_planifie)}
     med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
@@ -641,7 +583,6 @@ async def get_dashboard():
         avg_df['Durée Moyenne'] = avg_df['Durée (min)'].apply(format_duration)
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
-        
     top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top5 = []
     if not top5_df.empty:
@@ -650,8 +591,6 @@ async def get_dashboard():
         top5_df['Durée'] = top5_df['Durée (min)'].apply(format_duration)
         top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
         top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
-
-    # Liste des visites effectuées (OK)
     done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     done_visites = []
     if not done_df.empty:
@@ -660,15 +599,4 @@ async def get_dashboard():
         if 'Projet' not in done_df.columns: done_df['Projet'] = done_df['Projet_Affichage'] if 'Projet_Affichage' in done_df.columns else 'N/A'
         done_df['Statut visite'] = 'Done'
         done_visites = clean_for_json(done_df[['WORKDAY ID', 'Payroll ID', 'Nom complet', 'Projet', 'Statut visite']])
-        
-    return {
-        "metrics": metrics,
-        "avg_duration": avg_duration,
-        "top5": top5,
-        "done_visites": done_visites,
-        "charts": {
-            "chart1": chart1_data,
-            "chart2": chart2_data,
-            "chart3": chart3_data
-        }
-    }
+    return {"metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}}
