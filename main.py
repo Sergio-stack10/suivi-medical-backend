@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,10 +11,12 @@ import re
 import json
 import traceback
 import os
+import pickle
+import pymongo
+import bson
 
 app = FastAPI()
 
-# Sécurité (On autorise tout car tout est sur le même serveur)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,28 +25,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# On indique à Python de distribuer les fichiers HTML/CSS/JS qui sont dans le dossier "static"
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
 
-# --- MÉMOIRE DE L'APPLICATION ---
+# --- MÉMOIRE ET SAUVEGARDE PERMANENTE (MongoDB) ---
 app_state = {
     'plannings': {},
     'medical_list': None,
     'rta_data': None
 }
 
-# ==========================================
-# ROUTE PRINCIPALE (Affiche le site web)
-# ==========================================
+def get_mongo_client():
+    mongo_uri = os.environ.get("MONGO_URI")
+    if not mongo_uri: return None
+    try:
+        client = pymongo.MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        client.admin.command('ping')
+        return client
+    except: return None
+
+def load_history():
+    global app_state
+    client = get_mongo_client()
+    if client is None:
+        if os.path.exists("app_state.pkl"):
+            try:
+                with open("app_state.pkl", "rb") as f: app_state = pickle.load(f)
+            except: pass
+        return
+    
+    try:
+        db = client["visite_medicale_db"]
+        collection = db["app_state"]
+        doc = collection.find_one({"_id": 1})
+        if doc:
+            app_state = pickle.loads(doc['data'])
+    except: pass
+
+def save_history():
+    client = get_mongo_client()
+    if client is None:
+        try:
+            with open("app_state.pkl", "wb") as f: pickle.dump(app_state, f)
+        except: pass
+        return
+    try:
+        db = client["visite_medicale_db"]
+        collection = db["app_state"]
+        pickle_bytes = pickle.dumps(app_state)
+        collection.update_one({"_id": 1}, {"$set": {"data": bson.Binary(pickle_bytes)}}, upsert=True)
+    except: pass
+
+load_history()
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     with open(os.path.join("static", "index.html")) as f:
         return f.read()
 
 # ==========================================
-# FONCTIONS DE TRAITEMENT EXCEL
+# FONCTIONS UTILITAIRES
 # ==========================================
 def get_excel_engine(filename: str):
     if filename.endswith('.xlsb'): return 'pyxlsb'
@@ -128,37 +169,21 @@ def calculate_anciennete_num(hire_date_str):
         return max(0, months)
     except: return 0
 
-import json
-
 def clean_for_json(df):
-    """Fonction blindée pour convertir un DataFrame Pandas en dictionnaire valide pour le web."""
     if df is None or df.empty: return []
-    
     df = df.copy()
-    # 1. On formate toutes les dates en texte propre (dd/mm/yyyy)
     for col in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             df[col] = df[col].dt.strftime('%d/%m/%Y').fillna('')
-            
-    # 2. On remplace les valeurs infinies par des vides
     df = df.replace([np.inf, -np.inf], np.nan)
-    
-    # 3. On utilise la méthode native de Pandas qui gère parfaitement les NaN/NaT
     return json.loads(df.to_json(orient='records'))
-# ==========================================
-# FONCTIONS DE CALCUL (Pour le Dashboard)
-# ==========================================
+
 def get_mapped_project(projet):
     p = str(projet)
-    mapping = {
-        '18431': 'ORG ATH', '16187': 'BTL AT', '18354': 'AC', '16294': 'TE FOC', '21548': 'BKM POLY', '17042': 'CPR', '17439': 'FB', '25641': 'SHI', '16152': 'ORG HD', '22280': 'AY', '16315': 'MF', '18142': 'BB', '16872': 'CST', '16334': 'C+ INT', '12777': 'PF', '16873': 'BF', '17139': 'LP', '17056': 'ZAL TMM', '21565': 'SBX', '17057': 'VP SC', '16808': 'RRG', '16669': 'IZI', '17178': 'BKM', '17060': 'AUC', '11836': 'DRM', '11834': '3DS', '16966': 'LC', '16643': 'ZAL TNR', '24323': 'LYX', '16950': 'DB TMM', '17534': 'TRP', '17914': 'ZP', '16999': 'TII', '16412': 'HP', '16952': 'BTL DIG', '17429': 'GRA', '18175': 'RCI MG', '17230': 'JTR', '21550': 'CPR BE', '18338': 'MZ', '17130': 'MO', '24158': 'YK', '12480': 'C+ FR', '11753': 'VAL', '13966': 'H&H', '17401': '24S', '16571': 'TRK', '25659': 'ZAL DE', '11733': 'BF POLY', '23126': 'STC', '24474': 'CNX', '23404': 'C2B', '17567': 'POL', '26711': 'ADV', '24241': 'OPEX', '17043': 'DB TNR', '16827': 'LBC', '18013': 'BA', '16897': 'LC ANT', '16953': 'STY', '16437': 'ORG PRT', '18418': 'RIV TMM', '16352': 'RIV UK TMM', '17131': 'FLT', '18345': 'RIV ANT', '16351': 'RIV UK ANT', '26044': 'CNX', '980005758': 'LEAD', '980010299': 'ZPL', '2517': 'RECRU'
-    }
+    mapping = {'18431': 'ORG ATH', '16187': 'BTL AT', '18354': 'AC', '16294': 'TE FOC', '21548': 'BKM POLY', '17042': 'CPR', '17439': 'FB', '25641': 'SHI', '16152': 'ORG HD', '22280': 'AY', '16315': 'MF', '18142': 'BB', '16872': 'CST', '16334': 'C+ INT', '12777': 'PF', '16873': 'BF', '17139': 'LP', '17056': 'ZAL TMM', '21565': 'SBX', '17057': 'VP SC', '16808': 'RRG', '16669': 'IZI', '17178': 'BKM', '17060': 'AUC', '11836': 'DRM', '11834': '3DS', '16966': 'LC', '16643': 'ZAL TNR', '24323': 'LYX', '16950': 'DB TMM', '17534': 'TRP', '17914': 'ZP', '16999': 'TII', '16412': 'HP', '16952': 'BTL DIG', '17429': 'GRA', '18175': 'RCI MG', '17230': 'JTR', '21550': 'CPR BE', '18338': 'MZ', '17130': 'MO', '24158': 'YK', '12480': 'C+ FR', '11753': 'VAL', '13966': 'H&H', '17401': '24S', '16571': 'TRK', '25659': 'ZAL DE', '11733': 'BF POLY', '23126': 'STC', '24474': 'CNX', '23404': 'C2B', '17567': 'POL', '26711': 'ADV', '24241': 'OPEX', '17043': 'DB TNR', '16827': 'LBC', '18013': 'BA', '16897': 'LC ANT', '16953': 'STY', '16437': 'ORG PRT', '18418': 'RIV TMM', '16352': 'RIV UK TMM', '17131': 'FLT', '18345': 'RIV ANT', '16351': 'RIV UK ANT', '26044': 'CNX', '980005758': 'LEAD', '980010299': 'ZPL', '2517': 'RECRU'}
     for k, v in mapping.items():
         if p.startswith(k): return v
-    
-    str_mappings = {
-        'Depot Bingo Polyglot': 'DEPOT BINGO POLYGLOT', 'Gallinée': 'GALLINÉE', 'Direct Energie BOC': 'DIRECT ENERGIE BOC', 'Hostnfly': 'HOSTNFLY', 'TK Home Solutions': 'TK HOME SOLUTIONS', '4165 Piana': 'PIANA', 'Hellowork': 'HELLOWORK', 'Lydia': 'LYDIA', 'Club Funding': 'CLUB FUNDING', 'Wengo': 'WENGO', 'Califrais': 'CALIFRAIS', 'Joko': 'JOKO CUSTOMER CARE', 'WorlRemit': 'WORLREMIT', '4132 SENDWAVE': 'SENDWAVE', 'Tiiko': 'TIIKO', 'COLISEE': 'COLISEE', 'ENI SC': 'ENI SC', 'OMEO': 'OMEO', 'WORLDR SENDWAVE': 'WORLDR SENDWAVE', 'GPASPLUS': 'GPASPLUS', 'Footovision': 'FOOTOVISION', 'Sika Webhelp': 'SIKA WEBHELP OD', 'Tuffy Wall': 'TUFFY WALL', 'DOMISERVE': 'DOMISERVE', '22409 - Pnp': 'PNP TMM', '22432 - Other': 'OTHER', '22409 - Other': 'OTHER', '21317 - Legalplace': 'LEGALPLACE', '16679 - Gexel': 'GEXEL', '2921 - Originenergy': 'ORIGINENERGY', '23330 - Opexother': 'OPEXOTHER', '23776 - Other': 'OTHER', '14309 - Bytedance': 'BYTEDANCE', '4125 - Ceaa': 'CEAA', '24818 - Power Fleet': 'POWERFLEET', '12229 - Other': 'OTHER', '12230 - Other': 'OTHER', 'WHFR157 - P_DMS': 'BYTEL DIGITAL', 'WHFR2857 - P_4073': 'RIVER DE', 'WHUS012 - P_Gexel': 'GEXEL', 'WHFR2962 - Piana': 'PIANA', 'WHCRIT225 - A540 P_AL': 'VEEPEE SC', 'WHFR894 - P_TLS SGS': 'SGS', 'WHNL287 - Basic-fit': 'BASIC FIT NL', 'WHFR2963 - Colis Privac': 'COLIS PRIVÉ'
-    }
+    str_mappings = {'Depot Bingo Polyglot': 'DEPOT BINGO POLYGLOT', 'Gallinée': 'GALLINÉE', 'Direct Energie BOC': 'DIRECT ENERGIE BOC', 'Hostnfly': 'HOSTNFLY', 'TK Home Solutions': 'TK HOME SOLUTIONS', '4165 Piana': 'PIANA', 'Hellowork': 'HELLOWORK', 'Lydia': 'LYDIA', 'Club Funding': 'CLUB FUNDING', 'Wengo': 'WENGO', 'Califrais': 'CALIFRAIS', 'Joko': 'JOKO CUSTOMER CARE', 'WorlRemit': 'WORLREMIT', '4132 SENDWAVE': 'SENDWAVE', 'Tiiko': 'TIIKO', 'COLISEE': 'COLISEE', 'ENI SC': 'ENI SC', 'OMEO': 'OMEO', 'WORLDR SENDWAVE': 'WORLDR SENDWAVE', 'GPASPLUS': 'GPASPLUS', 'Footovision': 'FOOTOVISION', 'Sika Webhelp': 'SIKA WEBHELP OD', 'Tuffy Wall': 'TUFFY WALL', 'DOMISERVE': 'DOMISERVE', '22409 - Pnp': 'PNP TMM', '22432 - Other': 'OTHER', '22409 - Other': 'OTHER', '21317 - Legalplace': 'LEGALPLACE', '16679 - Gexel': 'GEXEL', '2921 - Originenergy': 'ORIGINENERGY', '23330 - Opexother': 'OPEXOTHER', '23776 - Other': 'OTHER', '14309 - Bytedance': 'BYTEDANCE', '4125 - Ceaa': 'CEAA', '24818 - Power Fleet': 'POWERFLEET', '12229 - Other': 'OTHER', '12230 - Other': 'OTHER', 'WHFR157 - P_DMS': 'BYTEL DIGITAL', 'WHFR2857 - P_4073': 'RIVER DE', 'WHUS012 - P_Gexel': 'GEXEL', 'WHFR2962 - Piana': 'PIANA', 'WHCRIT225 - A540 P_AL': 'VEEPEE SC', 'WHFR894 - P_TLS SGS': 'SGS', 'WHNL287 - Basic-fit': 'BASIC FIT NL', 'WHFR2963 - Colis Privac': 'COLIS PRIVÉ'}
     for k, v in str_mappings.items():
         if k.lower() in p.lower(): return v
     return p
@@ -177,6 +202,9 @@ def format_duration(mins):
     m = int(mins % 60)
     return f"{h}h {m}min" if h > 0 else f"{m}min"
 
+# ==========================================
+# FONCTIONS DE TRAITEMENT EXCEL
+# ==========================================
 def parse_planning(files_data: list):
     all_planning = []
     for filename, content in files_data:
@@ -189,34 +217,21 @@ def parse_planning(files_data: list):
         if "Tout (WFO+WFH)" in xls.sheet_names:
             df = pd.read_excel(io.BytesIO(content), sheet_name="Tout (WFO+WFH)", header=None, skiprows=3, engine=engine)
             cols = [3, 4, 5, 6, 7, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21, 23, 24, 25, 27, 28, 29, 31, 32, 33, 35, 36, 37]
-            new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 
-                        'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 
-                        'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 
-                        'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 
-                        'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
-            df = df.iloc[:, cols]
-            df.columns = new_cols
+            new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
+            df = df.iloc[:, cols]; df.columns = new_cols
         elif "TMM" in xls.sheet_names:
             df_head = pd.read_excel(io.BytesIO(content), sheet_name="TMM", header=None, nrows=10, engine=engine)
-            header_row_idx = None
-            trans_col_idx = 0
+            header_row_idx = None; trans_col_idx = 0
             for i in range(len(df_head)):
                 row = df_head.iloc[i].astype(str).str.strip().tolist()
                 if "Transport" in row:
-                    header_row_idx = i
-                    trans_col_idx = row.index("Transport")
-                    break
+                    header_row_idx = i; trans_col_idx = row.index("Transport"); break
             if header_row_idx is not None:
                 df = pd.read_excel(io.BytesIO(content), sheet_name="TMM", header=None, skiprows=header_row_idx + 1, engine=engine)
                 offset = trans_col_idx
                 cols = [0 + offset, 4 + offset, 2 + offset, 5 + offset, 8 + offset, 10 + offset, 11 + offset, 12 + offset, 13 + offset, 17 + offset, 18 + offset, 19 + offset, 23 + offset, 24 + offset, 25 + offset, 29 + offset, 30 + offset, 31 + offset, 35 + offset, 36 + offset, 37 + offset, 41 + offset, 42 + offset, 43 + offset, 47 + offset, 48 + offset, 49 + offset]
-                new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 
-                            'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 
-                            'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 
-                            'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 
-                            'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
-                df = df.iloc[:, cols]
-                df.columns = new_cols
+                new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
+                df = df.iloc[:, cols]; df.columns = new_cols
             else: continue
         else: continue
             
@@ -294,41 +309,25 @@ def parse_liste_visite(filename: str, content: bytes):
     return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
 
 def parse_rta_file(filename: str, content: bytes):
-    try:
-        engine = get_excel_engine(filename)
-        xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
-        sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
-        if not sheet_name: return None
-            
-        df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, engine=engine)
-        df = df.loc[:, ~df.columns.duplicated()]
+    engine = get_excel_engine(filename)
+    xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+    sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
+    if not sheet_name: return None
         
-        cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
-        df.columns = cols_cleaned
-        
-        rename_map = {'WORKDAY ID': 'WORKDAY ID', 'NOM': 'Nom', 'PRENOM': 'Prénom', 'STATUT VISITE': 'Statut Visite', 'DATE VISITE': 'Date Visite', 'HEURE DEPART': 'Heure Départ', 'HEURE RETOUR': 'Heure Retour', 'COMMENTAIRES': 'Commentaire', 'DUREE': 'Durée', 'PROJET': 'Projet'}
-        current_renames = {k: v for k, v in rename_map.items() if k in df.columns}
-        df = df.rename(columns=current_renames)
-        df = df.loc[:, ~df.columns.duplicated()]
-        
-        # On remplace les valeurs nulles AVANT de convertir les dates (évite le crash)
-        df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
-        
-        # On convertit en date/heure en mode "sécurisé"
-        if 'Date Visite' in df.columns:
-            df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
-        if 'Heure Départ' in df.columns:
-            df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
-        if 'Heure Retour' in df.columns:
-            df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
-                
-        if 'WORKDAY ID' in df.columns:
-            df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
-            
-        return df
-    except Exception as e:
-        print(f"ERREUR LECTURE RTA: {e}")
-        return None
+    df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, engine=engine)
+    df = df.loc[:, ~df.columns.duplicated()]
+    cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
+    df.columns = cols_cleaned
+    rename_map = {'WORKDAY ID': 'WORKDAY ID', 'NOM': 'Nom', 'PRENOM': 'Prénom', 'STATUT VISITE': 'Statut Visite', 'DATE VISITE': 'Date Visite', 'HEURE DEPART': 'Heure Départ', 'HEURE RETOUR': 'Heure Retour', 'COMMENTAIRES': 'Commentaire', 'DUREE': 'Durée', 'PROJET': 'Projet'}
+    current_renames = {k: v for k, v in rename_map.items() if k in df.columns}
+    df = df.rename(columns=current_renames)
+    df = df.loc[:, ~df.columns.duplicated()]
+    df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
+    if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
+    if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
+    if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
+    if 'WORKDAY ID' in df.columns: df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
+    return df
 
 # ==========================================
 # API ENDPOINTS
@@ -345,6 +344,7 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             df = parse_planning(files_data)
             week_name = files_data[0][0].split('.')[0]
             app_state['plannings'][week_name] = df
+            save_history()
             
             display_df = df.copy()
             dates_map = get_dates_from_week(week_name)
@@ -374,13 +374,31 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
         elif category == 'collab':
             df = parse_liste_visite(files_data[0][0], files_data[0][1])
             app_state['medical_list'] = df
+            save_history()
             return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
             
         elif category == 'suivi':
             df = parse_rta_file(files_data[0][0], files_data[0][1])
-            if df is None:
-                return {"message": "❌ Erreur: Le fichier RTA est illisible ou vide."}
+            if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
+            
+            # Mise à jour de la liste médicale avec les statuts du RTA
+            if app_state.get('medical_list') is not None:
+                med_list = app_state['medical_list'].copy()
+                for _, rta_row in df.iterrows():
+                    wid = str(rta_row.get('WORKDAY ID', '')).strip()
+                    if wid and wid in med_list['WORKDAY ID'].values:
+                        com = str(rta_row.get('Commentaire', '')).lower()
+                        statut_rta = str(rta_row.get('Statut Visite', '')).lower()
+                        if 'ok' in com:
+                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Visite Faite'
+                        elif 'absent' in com or 'report' in com or 'absent' in statut_rta or 'report' in statut_rta:
+                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Absent/Reporté'
+                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.NaT
+                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.NaT
+                app_state['medical_list'] = med_list
+
             app_state['rta_data'] = df
+            save_history()
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
             
     except Exception as e:
@@ -402,6 +420,17 @@ async def generate_planning(config: str = Form(...)):
         if medical_list is None or current_planning is None:
             return {"message": "❌ Erreur: Liste ou planning manquant."}
             
+        # 1. Remettre les absents dans le bain pour replanification
+        if app_state.get('rta_data') is not None:
+            rta_df = app_state['rta_data']
+            if 'Commentaire' in rta_df.columns:
+                mask_abs = rta_df['Commentaire'].astype(str).str.lower().str.contains('absent|report', na=False)
+                ids_to_replan = rta_df[mask_abs]['WORKDAY ID'].tolist()
+                if ids_to_replan:
+                    medical_list.loc[medical_list['WORKDAY ID'].isin(ids_to_replan), 'Statut Visite'] = 'Non Planifié'
+                    medical_list.loc[medical_list['WORKDAY ID'].isin(ids_to_replan), 'Date Visite'] = pd.NaT
+                    medical_list.loc[medical_list['WORKDAY ID'].isin(ids_to_replan), 'Créneau Visite'] = pd.NaT
+
         total_planned = 0
         for day_config in config['days']:
             if not day_config['actif']: continue
@@ -439,8 +468,11 @@ async def generate_planning(config: str = Form(...)):
             
             if day_config['statut_filter'] != "Tous":
                 working_df = working_df[working_df['Statut'].astype(str).str.upper() == day_config['statut_filter'].upper()]
+            
+            # 2. Exclure ceux déjà planifiés ou visités
             working_df = working_df[~working_df['Statut Visite'].isin(['Planifié', 'Visite Faite'])]
-            working_df['_is_replan'] = working_df.apply(lambda r: 'absent' in str(r.get('Statut Visite', '')).lower() or 'report' in str(r.get('Statut Visite', '')).lower() or 'absent' in str(r.get('Commentaire', '')).lower() or 'report' in str(r.get('Commentaire', '')).lower(), axis=1)
+            
+            working_df['_is_replan'] = working_df['Statut Visite'].astype(str).str.lower().eq('absent/reporté')
             
             if day_config['prio'] != "Aucune priorité" and 'Priorité Visite' in working_df.columns:
                 working_df['_is_priority'] = working_df['Priorité Visite'].astype(str).str.strip().str.lower() == day_config['prio'].lower()
@@ -493,6 +525,8 @@ async def generate_planning(config: str = Form(...)):
             total_planned += picked_river + picked_others
             
         app_state['medical_list'] = medical_list
+        save_history()
+        
         start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
         end_date = start_date + datetime.timedelta(days=6)
         planned_this_week = medical_list[
@@ -508,9 +542,7 @@ async def generate_planning(config: str = Form(...)):
     except Exception as e:
         print("ERREUR GÉNÉRATION:", traceback.format_exc())
         return {"message": f"❌ Erreur génération: {str(e)}"}
-# ==========================================
-# API POUR LA PAGE 6 (ABSENCES)
-# ==========================================
+
 @app.get("/api/absences")
 async def get_absences():
     rta_data = app_state.get('rta_data')
@@ -531,14 +563,11 @@ async def get_absences():
         abs_df['Date Visite'] = pd.to_datetime(abs_df['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
     return {"data": clean_for_json(abs_df[show_cols])}
 
-# ==========================================
-# API POUR LA PAGE 7 (DASHBOARD)
-# ==========================================
 @app.get("/api/dashboard")
 async def get_dashboard():
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
-        return {"metrics": {}, "avg_duration": [], "top5": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
+        return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
     
     med_df = rta_data.copy()
     
@@ -575,7 +604,6 @@ async def get_dashboard():
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
     
-    # --- DONNÉES POUR LES GRAPHIQUES ---
     chart1_data = []
     chart2_data = []
     if not med_df.empty:
@@ -606,7 +634,6 @@ async def get_dashboard():
         "non_planifie": max(0, total_a_passer - total_planifie)
     }
 
-    # Durée moyenne par jour
     med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
@@ -615,7 +642,6 @@ async def get_dashboard():
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
         
-    # Top 5
     top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top5 = []
     if not top5_df.empty:
@@ -624,11 +650,22 @@ async def get_dashboard():
         top5_df['Durée'] = top5_df['Durée (min)'].apply(format_duration)
         top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
         top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
+
+    # Liste des visites effectuées (OK)
+    done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
+    done_visites = []
+    if not done_df.empty:
+        done_df['Nom complet'] = done_df['Nom'].fillna('').astype(str) + ' ' + done_df['Prénom'].fillna('').astype(str)
+        if 'Payroll ID' not in done_df.columns: done_df['Payroll ID'] = ''
+        if 'Projet' not in done_df.columns: done_df['Projet'] = done_df['Projet_Affichage'] if 'Projet_Affichage' in done_df.columns else 'N/A'
+        done_df['Statut visite'] = 'Done'
+        done_visites = clean_for_json(done_df[['WORKDAY ID', 'Payroll ID', 'Nom complet', 'Projet', 'Statut visite']])
         
     return {
         "metrics": metrics,
         "avg_duration": avg_duration,
         "top5": top5,
+        "done_visites": done_visites,
         "charts": {
             "chart1": chart1_data,
             "chart2": chart2_data,
