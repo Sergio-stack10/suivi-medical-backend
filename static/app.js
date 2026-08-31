@@ -52,6 +52,7 @@ function switchPage(pageId, element) {
     document.querySelectorAll('.top-tab').forEach(btn => btn.classList.remove('active'));
     document.getElementById('page-' + pageId).classList.add('active');
     element.classList.add('active');
+    if (pageId === 'p1') loadWeeksDropdown();
     if (pageId === 'p3') { loadWeeks(); loadGenerated(); }
     if (pageId === 'p4') { loadGenerated(); }
     if (pageId === 'p6') loadAbsences();
@@ -89,6 +90,38 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
 
 function exportData(category) {
     window.location.href = `/api/export/${category}`;
+}
+// ==========================================
+// PAGE 1 : PLANNING (Sélection de semaine)
+// ==========================================
+async function loadWeeksDropdown() {
+    try {
+        const res = await fetch('/api/weeks');
+        const data = await res.json();
+        const select = document.getElementById('p1_week_select');
+        select.innerHTML = '';
+        if (data.weeks.length === 0) {
+            select.innerHTML = '<option>Aucune semaine</option>';
+            return;
+        }
+        data.weeks.forEach(week => {
+            const option = document.createElement('option');
+            option.value = week.name;
+            option.innerText = week.name;
+            select.appendChild(option);
+        });
+        loadSelectedPlanning();
+    } catch (e) {}
+}
+
+async function loadSelectedPlanning() {
+    const weekName = document.getElementById('p1_week_select').value;
+    if (!weekName || weekName === 'Aucune semaine') return;
+    try {
+        const res = await fetch(`/api/get_planning/${weekName}`);
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p1_table_body');
+    } catch(e) {}
 }
 
 // ==========================================
