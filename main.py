@@ -190,6 +190,35 @@ def format_duration(mins):
     m = int(mins % 60)
     return f"{h}h {m}min" if h > 0 else f"{m}min"
 
+# --- FONCTION SYNCHRONISATION STATUT (CC / ENC) ---
+def sync_statut_with_plannings(medical_list, history_plannings):
+    if medical_list is None or medical_list.empty: return medical_list
+    all_plannings = []
+    for p_df in history_plannings.values():
+        if 'Statut' in p_df.columns:
+            all_plannings.append(p_df[['WORKDAY ID', 'Paid ID', 'Statut']].copy())
+    if not all_plannings: return medical_list
+    
+    plannings_concat = pd.concat(all_plannings, ignore_index=True).drop_duplicates(subset=['WORKDAY ID'])
+    plannings_concat['WORKDAY ID'] = plannings_concat['WORKDAY ID'].astype(str).str.replace(" ", "").str.upper()
+    if 'Paid ID' in plannings_concat.columns:
+        plannings_concat['Paid ID'] = plannings_concat['Paid ID'].astype(str).str.replace(" ", "").str.upper()
+        
+    medical_list['WORKDAY ID'] = medical_list['WORKDAY ID'].astype(str).str.replace(" ", "").str.upper()
+    
+    map_wid = dict(zip(plannings_concat['WORKDAY ID'], plannings_concat['Statut']))
+    medical_list['Statut'] = medical_list['WORKDAY ID'].map(map_wid)
+    
+    if 'Payroll ID' in medical_list.columns and 'Paid ID' in plannings_concat.columns:
+        missing_mask = medical_list['Statut'].isna()
+        if missing_mask.any():
+            map_pid = dict(zip(plannings_concat['Paid ID'], plannings_concat['Statut']))
+            medical_list.loc[missing_mask, 'Statut'] = medical_list.loc[missing_mask, 'Payroll ID'].astype(str).str.replace(" ", "").str.upper().map(map_pid)
+            
+    medical_list['Statut'] = medical_list['Statut'].fillna('ENC')
+    medical_list['Statut'] = medical_list['Statut'].apply(lambda x: 'CC' if 'ADVISOR' in str(x).upper() or 'CUSTOMER SERVICE' in str(x).upper() or 'CC' in str(x).upper() else 'ENC')
+    return medical_list
+
 def parse_planning(files_data: list):
     all_planning = []
     for filename, content in files_data:
@@ -325,38 +354,21 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             df = parse_planning(files_data)
             wk_name = week_name if week_name else files_data[0][0].split('.')[0]
             app_state['plannings'][wk_name] = df
+            # Mise à jour des statuts CC/ENC si la liste existe déjà
+            if app_state.get('medical_list') is not None:
+                app_state['medical_list'] = sync_statut_with_plannings(app_state['medical_list'], app_state['plannings'])
             save_history()
-            
-            display_df = df.copy()
-            dates_map = get_dates_from_week(wk_name)
-            rename_map = {}
-            for j in jours:
-                d_str = dates_map[j].strftime('%d/%m/%Y')
-                if f'{j}_DE' in display_df.columns:
-                    rename_map[f'{j}_DE'] = f'{d_str} - Début'
-                    rename_map[f'{j}_A'] = f'{d_str} - Fin'
-                    rename_map[f'{j}_Flag'] = f'{d_str} - Présent'
-            display_df = display_df.rename(columns=rename_map)
-            for j in jours:
-                d_str = dates_map[j].strftime('%d/%m/%Y')
-                for suffix in [' - Début', ' - Fin']:
-                    col = f'{d_str}{suffix}'
-                    if col in display_df.columns:
-                        display_df[col] = display_df[col].apply(format_time_display)
-                        
-            cols_to_show = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet']
-            if 'Statut' in display_df.columns: cols_to_show.append('Statut')
-            for j in jours: 
-                d_str = dates_map[j].strftime('%d/%m/%Y')
-                cols_to_show += [f'{d_str} - Début', f'{d_str} - Fin', f'{d_str} - Présent']
-                
-            return {"message": f"✅ Planning importé: {len(df)} lignes.", "data": clean_for_json(display_df[cols_to_show].head(50))}
+            return {"message": f"✅ Planning importé: {len(df)} lignes."}
             
         elif category == 'collab':
             df = parse_liste_visite(files_data[0][0], files_data[0][1])
+            # Synchronisation immédiate avec les plannings existants
+            df = sync_statut_with_plannings(df, app_state['plannings'])
             app_state['medical_list'] = df
             save_history()
-            return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
+            # On retire la colonne 'Statut Visite' pour l'affichage de la Page 2
+            display_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite']
+            return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df[display_cols].head(50))}
             
         elif category == 'suivi':
             df = parse_rta_file(files_data[0][0], files_data[0][1])
@@ -382,6 +394,35 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
         print("ERREUR BACKEND:", traceback.format_exc())
         return {"message": f"❌ Erreur Python: {str(e)}"}
 
+@app.get("/api/get_planning/{week_name}")
+async def get_planning(week_name: str):
+    df = app_state['plannings'].get(week_name)
+    if df is None: return {"data": []}
+    display_df = df.copy()
+    dates_map = get_dates_from_week(week_name)
+    rename_map = {}
+    for j in jours:
+        d_str = dates_map[j].strftime('%d/%m/%Y')
+        if f'{j}_DE' in display_df.columns:
+            rename_map[f'{j}_DE'] = f'{d_str} - Début'
+            rename_map[f'{j}_A'] = f'{d_str} - Fin'
+            rename_map[f'{j}_Flag'] = f'{d_str} - Présent'
+    display_df = display_df.rename(columns=rename_map)
+    for j in jours:
+        d_str = dates_map[j].strftime('%d/%m/%Y')
+        for suffix in [' - Début', ' - Fin']:
+            col = f'{d_str}{suffix}'
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(format_time_display)
+                
+    cols_to_show = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet']
+    if 'Statut' in display_df.columns: cols_to_show.append('Statut')
+    for j in jours: 
+        d_str = dates_map[j].strftime('%d/%m/%Y')
+        cols_to_show += [f'{d_str} - Début', f'{d_str} - Fin', f'{d_str} - Présent']
+        
+    return {"data": clean_for_json(display_df[cols_to_show].head(50))}
+
 @app.delete("/api/delete/{category}")
 async def delete_data(category: str):
     if category == 'planning': app_state['plannings'] = {}
@@ -405,7 +446,6 @@ async def get_weeks():
 async def get_generated():
     med_list = app_state.get('medical_list')
     if med_list is None: return {"data": []}
-    # Retourne tous ceux qui ont une date de visite assignée
     mask = med_list['Date Visite'].notna()
     planned = med_list[mask].copy()
     planned['Date Visite'] = planned['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
