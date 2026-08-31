@@ -91,7 +91,8 @@
                 <div id="page-p1" class="page-content active">
                     <div class="page-header"><h1>Planning MC & River</h1></div>
                     <div class="action-bar">
-                        <button class="btn-icon" onclick="refreshData('planning', 'p1_table_body', 'p1_status')"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon" onclick="window.location.reload()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('planning')"><i class="fas fa-file-excel"></i> Exporter</button>
                         <button class="btn-icon danger" onclick="showDeleteModal('planning')"><i class="fas fa-trash"></i> Supprimer</button>
                     </div>
                     <div class="card">
@@ -108,7 +109,8 @@
                 <div id="page-p2" class="page-content">
                     <div class="page-header"><h1>Liste des Collaborateurs</h1></div>
                     <div class="action-bar">
-                        <button class="btn-icon" onclick="refreshData('collab', 'p2_table_body', 'p2_status')"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon" onclick="window.location.reload()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('collab')"><i class="fas fa-file-excel"></i> Exporter</button>
                         <button class="btn-icon danger" onclick="showDeleteModal('collab')"><i class="fas fa-trash"></i> Supprimer</button>
                     </div>
                     <div class="card">
@@ -136,7 +138,11 @@
                         <div id="p3_status" class="status-box" style="margin-top: 15px;"></div>
                     </div>
                     <div class="card" style="margin-top: 20px;">
-                        <div class="card-header">Personnes planifiées</div>
+                        <div class="action-bar" style="padding: 15px 25px 0 25px;">
+                            <button class="btn-icon export" onclick="exportData('generated')"><i class="fas fa-file-excel"></i> Exporter le généré</button>
+                            <button class="btn-icon danger" onclick="unplanAll()"><i class="fas fa-trash"></i> Effacer la planification</button>
+                        </div>
+                        <div class="card-header" style="margin-top: 15px;">Personnes planifiées</div>
                         <div class="table-container">
                             <table id="p3_table">
                                 <thead></thead>
@@ -149,14 +155,26 @@
                 <!-- Page 4 -->
                 <div id="page-p4" class="page-content">
                     <div class="page-header"><h1>Planning généré</h1></div>
-                    <div class="card"><div class="card-body"><p>Vue globale du planning généré (À venir)</p></div></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="loadGenerated()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('generated')"><i class="fas fa-file-excel"></i> Exporter</button>
+                    </div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p4_table">
+                                <thead></thead>
+                                <tbody id="p4_table_body"><tr><td class="empty-msg">Cliquez sur Actualiser.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Page 5 -->
                 <div id="page-p5" class="page-content">
                     <div class="page-header"><h1>Fichier Suivi (RTA)</h1></div>
                     <div class="action-bar">
-                        <button class="btn-icon" onclick="refreshData('suivi', 'p5_table_body', 'p5_status')"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon" onclick="window.location.reload()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('suivi')"><i class="fas fa-file-excel"></i> Exporter</button>
                         <button class="btn-icon danger" onclick="showDeleteModal('suivi')"><i class="fas fa-trash"></i> Supprimer</button>
                     </div>
                     <div class="card">
@@ -174,6 +192,7 @@
                     <div class="page-header"><h1>Absences</h1></div>
                     <div class="action-bar">
                         <button class="btn-icon" onclick="loadAbsences()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('absences')"><i class="fas fa-file-excel"></i> Exporter</button>
                     </div>
                     <div class="card">
                         <div class="table-container">
@@ -212,13 +231,19 @@
                         <div class="table-container"><table id="p7_top5_table"><thead></thead><tbody id="p7_top5_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
                     <div class="card">
-                        <div class="card-header">Liste des visites effectuées (OK)</div>
+                        <div class="action-bar" style="padding: 15px 25px 0 25px;">
+                            <button class="btn-icon export" onclick="exportData('done_visites')"><i class="fas fa-file-excel"></i> Exporter la liste</button>
+                        </div>
+                        <div class="card-header" style="margin-top: 15px;">Liste des visites effectuées (OK)</div>
                         <div class="table-container"><table id="p7_done_table"><thead></thead><tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
                 </div>
 
             </main>
         </div>
+        
+        <!-- Signature -->
+        <div class="footer-fix">Developed by <span style="color: #25E2CC; font-weight: 700;">TEAM TMM 🦄</span></div>
     </div>
 
     <script src="/static/app.js"></script>
