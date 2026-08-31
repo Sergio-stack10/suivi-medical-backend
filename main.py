@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import pandas as pd
@@ -8,22 +10,25 @@ import io
 import re
 import json
 import traceback
+import os
 
 app = FastAPI()
 
-from fastapi.middleware.cors import CORSMiddleware
-
+# Sécurité (On autorise tout car tout est sur le même serveur)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
+
+# On indique à Python de distribuer les fichiers HTML/CSS/JS qui sont dans le dossier "static"
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
 
+# --- MÉMOIRE DE L'APPLICATION ---
 app_state = {
     'plannings': {},
     'medical_list': None,
@@ -31,7 +36,15 @@ app_state = {
 }
 
 # ==========================================
-# FONCTIONS UTILITAIRES
+# ROUTE PRINCIPALE (Affiche le site web)
+# ==========================================
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    with open(os.path.join("static", "index.html")) as f:
+        return f.read()
+
+# ==========================================
+# FONCTIONS DE TRAITEMENT EXCEL
 # ==========================================
 def get_excel_engine(filename: str):
     if filename.endswith('.xlsb'): return 'pyxlsb'
@@ -123,23 +136,16 @@ def clean_for_json(df):
             df[col] = df[col].astype(str).replace('NaT', '')
     return df.astype(str).replace({'NaT': '', 'None': '', 'nan': ''}).to_dict('records')
 
-# ==========================================
-# FONCTIONS DE TRAITEMENT EXCEL
-# ==========================================
 def parse_planning(files_data: list):
     all_planning = []
     for filename, content in files_data:
-        print(f"   -> Lecture Excel Planning: {filename}...")
         engine = get_excel_engine(filename)
         try:
             xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
-        except Exception as e:
-            print(f"   ❌ ERREUR LECTURE PLANNING: {e}")
-            continue
+        except: continue
 
         df = None
         if "Tout (WFO+WFH)" in xls.sheet_names:
-            print("   -> Feuille 'Tout (WFO+WFH)' trouvée.")
             df = pd.read_excel(io.BytesIO(content), sheet_name="Tout (WFO+WFH)", header=None, skiprows=3, engine=engine)
             cols = [3, 4, 5, 6, 7, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21, 23, 24, 25, 27, 28, 29, 31, 32, 33, 35, 36, 37]
             new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 
@@ -150,7 +156,6 @@ def parse_planning(files_data: list):
             df = df.iloc[:, cols]
             df.columns = new_cols
         elif "TMM" in xls.sheet_names:
-            print("   -> Feuille 'TMM' trouvée.")
             df_head = pd.read_excel(io.BytesIO(content), sheet_name="TMM", header=None, nrows=10, engine=engine)
             header_row_idx = None
             trans_col_idx = 0
@@ -181,14 +186,12 @@ def parse_planning(files_data: list):
         for j in jours:
             df[f'{j}_Flag'] = df[f'{j}_DE'].apply(lambda x: 1 if is_planned(x) else 0)
         all_planning.append(df)
-        print(f"   ✅ Fichier {filename} lu avec succès ({len(df)} lignes).")
         
     if all_planning: 
         return pd.concat(all_planning, ignore_index=True).drop_duplicates(subset=['WORKDAY ID'])
     return pd.DataFrame()
 
 def parse_liste_visite(filename: str, content: bytes):
-    print(f"   -> Lecture Excel Liste: {filename}...")
     engine = get_excel_engine(filename)
     df = pd.read_excel(io.BytesIO(content), engine=engine)
     cols_cleaned = [str(c).strip().upper() for c in df.columns]
@@ -247,12 +250,9 @@ def parse_liste_visite(filename: str, content: bytes):
     
     final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite']
     if 'Statut Visite' not in df.columns: df['Statut Visite'] = 'Non Planifié'
-    
-    print(f"   ✅ Fichier {filename} lu avec succès ({len(df)} lignes).")
     return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
 
 def parse_rta_file(filename: str, content: bytes):
-    print(f"   -> Lecture Excel Suivi: {filename}...")
     engine = get_excel_engine(filename)
     xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
     sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
@@ -271,23 +271,18 @@ def parse_rta_file(filename: str, content: bytes):
     if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
     if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
     if 'WORKDAY ID' in df.columns: df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
-    
-    print(f"   ✅ Fichier {filename} lu avec succès ({len(df)} lignes).")
     return df
 
 # ==========================================
-# ENDPOINTS API
+# API ENDPOINTS
 # ==========================================
 @app.post("/api/import")
 async def import_files(files: List[UploadFile] = File(...), category: str = Form(...)):
-    print(f"\n[IMPORT] Demande reçue pour catégorie: {category}")
     try:
-        # Lecture asynchrone des fichiers pour éviter de bloquer le serveur
         files_data = []
         for f in files:
             content = await f.read()
             files_data.append((f.filename, content))
-            print(f"[IMPORT] Fichier reçu: {f.filename} (Taille: {len(content)} octets)")
 
         if category == 'planning':
             df = parse_planning(files_data)
@@ -317,23 +312,20 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
                 d_str = dates_map[j].strftime('%d/%m/%Y')
                 cols_to_show += [f'{d_str} - Début', f'{d_str} - Fin', f'{d_str} - Présent']
                 
-            print("[IMPORT] Envoi des données au frontend...\n")
             return {"message": f"✅ Planning importé: {len(df)} lignes.", "data": clean_for_json(display_df[cols_to_show].head(50))}
             
         elif category == 'collab':
             df = parse_liste_visite(files_data[0][0], files_data[0][1])
             app_state['medical_list'] = df
-            print("[IMPORT] Envoi des données au frontend...\n")
             return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
             
         elif category == 'suivi':
             df = parse_rta_file(files_data[0][0], files_data[0][1])
             app_state['rta_data'] = df
-            print("[IMPORT] Envoi des données au frontend...\n")
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
             
     except Exception as e:
-        print("❌ ERREUR BACKEND:", traceback.format_exc())
+        print("ERREUR BACKEND:", traceback.format_exc())
         return {"message": f"❌ Erreur Python: {str(e)}"}
 
 @app.get("/api/weeks")
@@ -342,7 +334,6 @@ async def get_weeks():
 
 @app.post("/api/generate")
 async def generate_planning(config: str = Form(...)):
-    print("\n[GENERATE] Demande de génération reçue...")
     try:
         config = json.loads(config)
         medical_list = app_state['medical_list'].copy()
@@ -355,7 +346,6 @@ async def generate_planning(config: str = Form(...)):
         total_planned = 0
         for day_config in config['days']:
             if not day_config['actif']: continue
-            print(f"[GENERATE] Traitement du jour: {day_config['date']}")
             date_str = day_config['date']
             date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
             day_idx = date_obj.weekday()
@@ -442,7 +432,6 @@ async def generate_planning(config: str = Form(...)):
             picked_river = assign_slots(df_river, int(day_config['qty_river']))
             picked_others = assign_slots(df_others, int(day_config['qty_others']))
             total_planned += picked_river + picked_others
-            print(f"[GENERATE] Jour {day_config['date']} terminé. River: {picked_river}, Autres: {picked_others}")
             
         app_state['medical_list'] = medical_list
         start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
@@ -453,11 +442,10 @@ async def generate_planning(config: str = Form(...)):
             (pd.to_datetime(medical_list['Date Visite'], errors='coerce') <= pd.Timestamp(end_date))
         ].copy()
         
-        print("[GENERATE] Envoi du planning généré au frontend...\n")
         return {
             "message": f"✅ {total_planned} collaborateurs planifiés !",
             "data": clean_for_json(planned_this_week[['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])
         }
     except Exception as e:
-        print("❌ ERREUR GÉNÉRATION:", traceback.format_exc())
+        print("ERREUR GÉNÉRATION:", traceback.format_exc())
         return {"message": f"❌ Erreur génération: {str(e)}"}
