@@ -28,7 +28,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None}
+app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None, 'absences': pd.DataFrame()}
 
 def get_mongo_client():
     mongo_uri = os.environ.get("MONGO_URI")
@@ -52,7 +52,11 @@ def load_history():
         db = client["visite_medicale_db"]
         collection = db["app_state"]
         doc = collection.find_one({"_id": 1})
-        if doc: app_state = pickle.loads(doc['data'])
+        if doc:
+            loaded_state = pickle.loads(doc['data'])
+            if 'absences' not in loaded_state or not isinstance(loaded_state['absences'], pd.DataFrame):
+                loaded_state['absences'] = pd.DataFrame()
+            app_state = loaded_state
     except: pass
 
 def save_history():
@@ -190,7 +194,6 @@ def format_duration(mins):
     m = int(mins % 60)
     return f"{h}h {m}min" if h > 0 else f"{m}min"
 
-# --- FONCTION SYNCHRONISATION STATUT (CC / ENC) ---
 def sync_statut_with_plannings(medical_list, history_plannings):
     if medical_list is None or medical_list.empty: return medical_list
     all_plannings = []
@@ -198,23 +201,18 @@ def sync_statut_with_plannings(medical_list, history_plannings):
         if 'Statut' in p_df.columns:
             all_plannings.append(p_df[['WORKDAY ID', 'Paid ID', 'Statut']].copy())
     if not all_plannings: return medical_list
-    
     plannings_concat = pd.concat(all_plannings, ignore_index=True).drop_duplicates(subset=['WORKDAY ID'])
     plannings_concat['WORKDAY ID'] = plannings_concat['WORKDAY ID'].astype(str).str.replace(" ", "").str.upper()
     if 'Paid ID' in plannings_concat.columns:
         plannings_concat['Paid ID'] = plannings_concat['Paid ID'].astype(str).str.replace(" ", "").str.upper()
-        
     medical_list['WORKDAY ID'] = medical_list['WORKDAY ID'].astype(str).str.replace(" ", "").str.upper()
-    
     map_wid = dict(zip(plannings_concat['WORKDAY ID'], plannings_concat['Statut']))
     medical_list['Statut'] = medical_list['WORKDAY ID'].map(map_wid)
-    
     if 'Payroll ID' in medical_list.columns and 'Paid ID' in plannings_concat.columns:
         missing_mask = medical_list['Statut'].isna()
         if missing_mask.any():
             map_pid = dict(zip(plannings_concat['Paid ID'], plannings_concat['Statut']))
             medical_list.loc[missing_mask, 'Statut'] = medical_list.loc[missing_mask, 'Payroll ID'].astype(str).str.replace(" ", "").str.upper().map(map_pid)
-            
     medical_list['Statut'] = medical_list['Statut'].fillna('ENC')
     medical_list['Statut'] = medical_list['Statut'].apply(lambda x: 'CC' if 'ADVISOR' in str(x).upper() or 'CUSTOMER SERVICE' in str(x).upper() or 'CC' in str(x).upper() else 'ENC')
     return medical_list
@@ -225,7 +223,6 @@ def parse_planning(files_data: list):
         engine = get_excel_engine(filename)
         try: xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
         except: continue
-
         df = None
         if "Tout (WFO+WFH)" in xls.sheet_names:
             df = pd.read_excel(io.BytesIO(content), sheet_name="Tout (WFO+WFH)", header=None, skiprows=3, engine=engine)
@@ -247,17 +244,13 @@ def parse_planning(files_data: list):
                 df = df.iloc[:, cols]; df.columns = new_cols
             else: continue
         else: continue
-            
         df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
         df['Paid ID'] = df['Paid ID'].astype(str).str.replace(" ", "").str.upper()
         df = df[df['WORKDAY ID'].str.contains(r'[A-Z0-9]', na=False)]
         df = df[~df['WORKDAY ID'].isin(['NAN', 'NONE', '*', ''])]
-        for j in jours:
-            df[f'{j}_Flag'] = df[f'{j}_DE'].apply(lambda x: 1 if is_planned(x) else 0)
+        for j in jours: df[f'{j}_Flag'] = df[f'{j}_DE'].apply(lambda x: 1 if is_planned(x) else 0)
         all_planning.append(df)
-        
-    if all_planning: 
-        return pd.concat(all_planning, ignore_index=True).drop_duplicates(subset=['WORKDAY ID'])
+    if all_planning: return pd.concat(all_planning, ignore_index=True).drop_duplicates(subset=['WORKDAY ID'])
     return pd.DataFrame()
 
 def parse_liste_visite(filename: str, content: bytes):
@@ -265,7 +258,6 @@ def parse_liste_visite(filename: str, content: bytes):
     df = pd.read_excel(io.BytesIO(content), engine=engine)
     cols_cleaned = [str(c).strip().upper() for c in df.columns]
     df.columns = cols_cleaned
-    
     id_col = nom_col = prenom_col = projet_col = visite_col = hire_col = paid_col = statut_col = None
     for c in df.columns:
         if 'WORKDAY' in c or 'EMPLOYEE' in c or 'MATRICULE' in c: id_col = c
@@ -277,7 +269,6 @@ def parse_liste_visite(filename: str, content: bytes):
         if 'HIRE' in c and 'DATE' in c: hire_col = c
         if 'PREVIOUS PAYROLL' in c or 'PAID ID' in c or 'PAYROLL ID' in c: paid_col = c
         if 'STATUT' in c or 'POSTE' in c or 'JOB' in c or 'TITLE' in c or 'POSITION' in c or 'ROLE' in c: statut_col = c
-        
     if id_col is None: return None
     cols_to_keep = [id_col]
     if paid_col: cols_to_keep.append(paid_col)
@@ -287,9 +278,7 @@ def parse_liste_visite(filename: str, content: bytes):
     if visite_col: cols_to_keep.append(visite_col)
     if hire_col: cols_to_keep.append(hire_col)
     if statut_col: cols_to_keep.append(statut_col)
-    
     df = df[cols_to_keep].copy()
-    
     if projet_col: df['Projet'] = df[projet_col]
     else: df['Projet'] = 'N/A'
     if visite_col: df['Priorité Visite'] = df[visite_col]
@@ -304,19 +293,15 @@ def parse_liste_visite(filename: str, content: bytes):
         raw_statut = df[statut_col].astype(str).str.upper()
         df['Statut'] = raw_statut.apply(lambda x: 'CC' if 'ADVISOR' in x or 'CUSTOMER SERVICE' in x or 'CC' in x else 'ENC')
     else: df['Statut'] = 'ENC'
-        
     df[id_col] = df[id_col].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
     df = df.rename(columns={id_col: 'WORKDAY ID'})
     if nom_col: df = df.rename(columns={nom_col: 'Nom'})
     if 'Nom' not in df.columns: df['Nom'] = ''
-    
     df = df[df['WORKDAY ID'].str.contains(r'[A-Z0-9]', na=False)]
     df = df[~df['WORKDAY ID'].isin(['NAN', 'NONE', '*', ''])]
-    
     df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce')
     df['Ancienneté'] = df['Date d\'embauche'].apply(calculate_anciennete)
     df['Ancienneté_num'] = df['Date d\'embauche'].apply(calculate_anciennete_num)
-    
     final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite']
     if 'Statut Visite' not in df.columns: df['Statut Visite'] = 'Non Planifié'
     return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
@@ -326,7 +311,6 @@ def parse_rta_file(filename: str, content: bytes):
     xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
     sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
     if not sheet_name: return None
-        
     df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, engine=engine)
     df = df.loc[:, ~df.columns.duplicated()]
     cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
@@ -354,7 +338,6 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             df = parse_planning(files_data)
             wk_name = week_name if week_name else files_data[0][0].split('.')[0]
             app_state['plannings'][wk_name] = df
-            # Mise à jour des statuts CC/ENC si la liste existe déjà
             if app_state.get('medical_list') is not None:
                 app_state['medical_list'] = sync_statut_with_plannings(app_state['medical_list'], app_state['plannings'])
             save_history()
@@ -362,17 +345,32 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             
         elif category == 'collab':
             df = parse_liste_visite(files_data[0][0], files_data[0][1])
-            # Synchronisation immédiate avec les plannings existants
             df = sync_statut_with_plannings(df, app_state['plannings'])
             app_state['medical_list'] = df
             save_history()
-            # On retire la colonne 'Statut Visite' pour l'affichage de la Page 2
             display_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite']
             return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df[display_cols].head(50))}
             
         elif category == 'suivi':
             df = parse_rta_file(files_data[0][0], files_data[0][1])
             if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
+            
+            # Mise à jour de la liste des absents de façon persistante
+            if 'Statut Visite' not in df.columns: df['Statut Visite'] = ''
+            if 'Commentaire' not in df.columns: df['Commentaire'] = ''
+            mask = df['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | df['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
+            new_abs = df[mask].copy()
+            if not new_abs.empty:
+                if 'Nom' in new_abs.columns and 'Prénom' in new_abs.columns: new_abs['Nom complet'] = new_abs['Nom'].fillna('').astype(str) + ' ' + new_abs['Prénom'].fillna('').astype(str)
+                else: new_abs['Nom complet'] = ''
+                show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Commentaire']
+                show_cols = [c for c in show_cols if c in new_abs.columns]
+                new_abs = new_abs[show_cols].copy()
+                if 'Date Visite' in new_abs.columns: new_abs['Date Visite'] = pd.to_datetime(new_abs['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+                if app_state.get('absences') is None or app_state['absences'].empty: app_state['absences'] = new_abs
+                else: app_state['absences'] = pd.concat([app_state['absences'], new_abs]).drop_duplicates(subset=['WORKDAY ID', 'Date Visite']).reset_index(drop=True)
+
+            # Mise à jour du statut Visite dans la liste médicale
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
                 for _, rta_row in df.iterrows():
@@ -386,6 +384,7 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
                             med_list.loc[med_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.NaT
                             med_list.loc[med_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.NaT
                 app_state['medical_list'] = med_list
+
             app_state['rta_data'] = df
             save_history()
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
@@ -414,13 +413,11 @@ async def get_planning(week_name: str):
             col = f'{d_str}{suffix}'
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(format_time_display)
-                
     cols_to_show = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet']
     if 'Statut' in display_df.columns: cols_to_show.append('Statut')
     for j in jours: 
         d_str = dates_map[j].strftime('%d/%m/%Y')
         cols_to_show += [f'{d_str} - Début', f'{d_str} - Fin', f'{d_str} - Présent']
-        
     return {"data": clean_for_json(display_df[cols_to_show].head(50))}
 
 @app.delete("/api/delete/{category}")
@@ -428,6 +425,7 @@ async def delete_data(category: str):
     if category == 'planning': app_state['plannings'] = {}
     elif category == 'collab': app_state['medical_list'] = None
     elif category == 'suivi': app_state['rta_data'] = None
+    elif category == 'absences': app_state['absences'] = pd.DataFrame()
     save_history()
     return {"message": "Données supprimées avec succès."}
 
@@ -436,10 +434,7 @@ async def get_weeks():
     weeks_data = []
     for wk, df in app_state['plannings'].items():
         dates_map = get_dates_from_week(wk)
-        weeks_data.append({
-            "name": wk,
-            "dates": [dates_map[j].strftime('%Y-%m-%d') for j in jours[:5]]
-        })
+        weeks_data.append({"name": wk, "dates": [dates_map[j].strftime('%Y-%m-%d') for j in jours[:5]]})
     return {"weeks": weeks_data}
 
 @app.get("/api/generated")
@@ -589,19 +584,9 @@ async def generate_planning(config: str = Form(...)):
 
 @app.get("/api/absences")
 async def get_absences():
-    rta_data = app_state.get('rta_data')
-    if rta_data is None or rta_data.empty: return {"data": []}
-    df = rta_data.copy()
-    if 'Statut Visite' not in df.columns: df['Statut Visite'] = ''
-    if 'Commentaire' not in df.columns: df['Commentaire'] = ''
-    mask = df['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | df['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
-    abs_df = df[mask].copy()
-    if 'Nom' in abs_df.columns and 'Prénom' in abs_df.columns: abs_df['Nom complet'] = abs_df['Nom'].fillna('').astype(str) + ' ' + abs_df['Prénom'].fillna('').astype(str)
-    else: abs_df['Nom complet'] = ''
-    show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Commentaire']
-    show_cols = [c for c in show_cols if c in abs_df.columns]
-    if 'Date Visite' in abs_df.columns: abs_df['Date Visite'] = pd.to_datetime(abs_df['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
-    return {"data": clean_for_json(abs_df[show_cols])}
+    abs_df = app_state.get('absences')
+    if abs_df is None or abs_df.empty: return {"data": []}
+    return {"data": clean_for_json(abs_df)}
 
 @app.get("/api/dashboard")
 async def get_dashboard():
@@ -621,31 +606,42 @@ async def get_dashboard():
     med_df['Graph Status'] = med_df.apply(get_final_status, axis=1)
     total_a_passer = len(med_df)
     condition_fait = med_df['Graph Status'] == 'Visite effectuée'
-    condition_abs = med_df['Graph Status'] == 'Absent/Reporté'
     total_fait = len(med_df[condition_fait])
     total_planifie = len(med_df[med_df['Statut Visite'].astype(str).str.lower().isin(['planifié', 'planifie'])])
-    total_absent = len(med_df[condition_abs])
-    metrics = {"total_a_passer": total_a_passer, "total_fait": total_fait, "total_planifie": total_planifie, "total_absent": total_absent, "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"}
+    reste_a_planifier = max(0, total_a_passer - total_planifie)
+    metrics = {"total_a_passer": total_a_passer, "total_planifie": total_planifie, "total_fait": total_fait, "reste_a_planifier": reste_a_planifier, "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"}
+    
     chart1_data = []
     chart2_data = []
     if not med_df.empty:
-        g1_df = med_df.copy()
-        g1_df['Statut Graph'] = g1_df['Statut Visite'].astype(str).apply(lambda x: 'Planifié' if str(x).strip().lower() in ['planifié', 'planifie'] else 'Non Planifié')
-        counts_df = g1_df.groupby(['Projet_Affichage', 'Statut Graph']).size().unstack(fill_value=0).reset_index()
-        for col in ['Planifié', 'Non Planifié']:
-            if col not in counts_df.columns: counts_df[col] = 0
-        counts_df['Total'] = counts_df['Planifié'] + counts_df['Non Planifié']
+        temp_df = med_df.copy()
+        temp_df['Statut_Graph'] = temp_df['Graph Status']
+        counts_df = temp_df.groupby(['Projet_Affichage', 'Statut_Graph']).size().unstack(fill_value=0).reset_index()
+        for col in ['Visite effectuée', 'Planifié', 'Non Planifié', 'Absent/Reporté']:
+            if col not in counts_df: counts_df[col] = 0
+        counts_df['Total'] = counts_df['Visite effectuée'] + counts_df['Planifié'] + counts_df['Non Planifié'] + counts_df['Absent/Reporté']
         counts_df = counts_df.sort_values('Total', ascending=False)
-        for _, row in counts_df.iterrows(): chart1_data.append({"project": str(row['Projet_Affichage']), "total": int(row['Total']), "planifie": int(row['Planifié'])})
-        project_order = med_df['Projet_Affichage'].value_counts().index.tolist()
-        for proj in project_order:
-            proj_df = med_df[med_df['Projet_Affichage'] == proj]
-            planifie_count = len(proj_df[proj_df['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie'])])
-            com_lower = proj_df['Commentaire'].astype(str).str.lower()
-            faite_count = len(proj_df[com_lower.str.contains('ok', na=False)])
-            abs_count = len(proj_df[com_lower.str.contains('absent|report', na=False)])
-            if planifie_count + faite_count + abs_count > 0: chart2_data.append({"project": proj, "planifie": planifie_count, "faite": faite_count, "absent": abs_count})
-    chart3_data = {"effectuee": total_fait, "reste": max(0, total_planifie - total_fait), "non_planifie": max(0, total_a_passer - total_planifie)}
+        for _, row in counts_df.iterrows():
+            chart1_data.append({
+                "project": str(row['Projet_Affichage']), 
+                "total": int(row['Total']), 
+                "planifie": int(row['Planifié']), 
+                "faite": int(row['Visite effectuée'])
+            })
+            
+        med_df['Date Visite Str'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('N/A')
+        chart2_df = med_df.groupby(['Date Visite Str', 'Graph Status']).size().unstack(fill_value=0).reset_index()
+        for col in ['Planifié', 'Absent/Reporté']:
+            if col not in chart2_df: chart2_df[col] = 0
+        chart2_df = chart2_df.sort_values('Date Visite Str')
+        for _, row in chart2_df.iterrows():
+            chart2_data.append({
+                "date": str(row['Date Visite Str']), 
+                "planifie": int(row['Planifié']), 
+                "absent": int(row['Absent/Reporté'])
+            })
+
+    chart3_data = {"effectuee": total_fait, "reste": max(0, total_planifie - total_fait), "non_planifie": reste_a_planifier}
     med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
@@ -675,23 +671,16 @@ async def get_dashboard():
 async def export_data(category: str):
     df = None
     if category == 'planning':
-        if app_state['plannings']:
-            df = list(app_state['plannings'].values())[0]
+        if app_state['plannings']: df = list(app_state['plannings'].values())[0]
     elif category == 'collab': df = app_state.get('medical_list')
     elif category == 'suivi': df = app_state.get('rta_data')
-    elif category == 'absences':
-        rta_data = app_state.get('rta_data')
-        if rta_data is not None:
-            mask = rta_data['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | rta_data['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
-            df = rta_data[mask].copy()
+    elif category == 'absences': df = app_state.get('absences')
     elif category == 'done_visites':
         rta_data = app_state.get('rta_data')
-        if rta_data is not None:
-            df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
+        if rta_data is not None: df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     elif category == 'generated':
         med_list = app_state.get('medical_list')
-        if med_list is not None:
-            df = med_list[med_list['Date Visite'].notna()].copy()
+        if med_list is not None: df = med_list[med_list['Date Visite'].notna()].copy()
 
     if df is None or df.empty: return {"error": "Aucune donnée à exporter"}
 
