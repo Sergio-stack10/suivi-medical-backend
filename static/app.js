@@ -60,6 +60,8 @@ function switchPage(pageId, element) {
     element.classList.add('active');
     
     if (pageId === 'p3') loadWeeks();
+        if (pageId === 'p6') loadAbsences();
+    if (pageId === 'p7') loadDashboard();
 }
 
 // ==========================================
@@ -268,5 +270,70 @@ async function generatePlanning() {
         statusMsg.innerText = "❌ Erreur : " + e.message;
         statusMsg.style.color = "red";
         if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#ff6b6b; padding:20px;">Échec.</td></tr>';
+    }
+}// ==========================================
+// PAGE 6 & 7 : DONNÉES
+// ==========================================
+async function loadAbsences() {
+    const tbody = document.getElementById('p6_table_body');
+    let thead = document.querySelector('#p6_table thead');
+    if (thead) thead.innerHTML = '';
+    if (tbody) tbody.innerHTML = '<tr><td class="empty-msg">Chargement des absences...</td></tr>';
+    try {
+        const res = await fetch('/api/absences');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p6_table_body');
+    } catch(e) {
+        if (tbody) tbody.innerHTML = '<tr><td class="empty-msg">Erreur de chargement.</td></tr>';
+    }
+}
+
+async function loadDashboard() {
+    const metricsDiv = document.getElementById('p7_metrics');
+    const avgBody = document.getElementById('p7_avg_body');
+    const top5Body = document.getElementById('p7_top5_body');
+    
+    metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
+    if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+
+    try {
+        const res = await fetch('/api/dashboard');
+        const result = await res.json();
+        
+        // Affichage des métriques
+        const m = result.metrics;
+        metricsDiv.innerHTML = `
+            <div class="metric-card">
+                <div class="metric-icon blue"><i class="fas fa-users"></i></div>
+                <div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon green"><i class="fas fa-check-circle"></i></div>
+                <div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div>
+                <div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon red"><i class="fas fa-times-circle"></i></div>
+                <div class="metric-info"><h3>${m.total_absent || 0}</h3><p>Absents / Reportés</p></div>
+            </div>
+        `;
+        
+        // Affichage durée moyenne
+        renderDynamicTable(result.avg_duration, 'p7_avg_body');
+        if (result.avg_duration && result.avg_duration.length > 0) {
+            const thead = document.querySelector('#p7_avg_table thead');
+            if (thead) thead.innerHTML = '<tr><th>Date</th><th>Durée Moyenne</th></tr>';
+        }
+
+        // Affichage Top 5
+        renderDynamicTable(result.top5, 'p7_top5_body');
+        
+    } catch(e) {
+        console.error(e);
+        metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur</h3></div></div>';
     }
 }
