@@ -7,9 +7,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css">
-        <!-- Ajout de Plotly pour les graphiques -->
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
@@ -19,33 +18,38 @@
             <div class="auth-logo"><i class="fas fa-user-doctor"></i></div>
             <h1 class="auth-title">Suivi Visites Médicales</h1>
             <p class="auth-subtitle">Veuillez vous connecter pour accéder à l'application.</p>
-            <div class="input-group">
-                <label for="loginUser">Nom d'utilisateur</label>
-                <div class="input-wrapper"><i class="fas fa-user"></i><input type="text" id="loginUser" placeholder="Utilisateur"></div>
-            </div>
-            <div class="input-group">
-                <label for="loginPass">Mot de passe</label>
-                <div class="input-wrapper"><i class="fas fa-key"></i><input type="password" id="loginPass" placeholder="••••••••"></div>
-            </div>
+            <div class="input-group"><label for="loginUser">Nom d'utilisateur</label><div class="input-wrapper"><i class="fas fa-user"></i><input type="text" id="loginUser" placeholder="Utilisateur"></div></div>
+            <div class="input-group"><label for="loginPass">Mot de passe</label><div class="input-wrapper"><i class="fas fa-key"></i><input type="password" id="loginPass" placeholder="••••••••"></div></div>
             <button id="loginBtn" class="auth-btn" onclick="handleLogin()">Se connecter</button>
             <div id="authError" class="auth-error">Identifiants incorrects.</div>
         </div>
     </div>
 
+    <!-- Modale de Validation -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-icon"><i class="fas fa-exclamation-triangle"></i></div>
+            <h2 class="modal-title">Confirmer la suppression</h2>
+            <p id="modalText" class="modal-text">Voulez-vous vraiment supprimer ces données ?</p>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeModal()">Annuler</button>
+                <button class="btn-confirm" id="modalConfirmBtn">Supprimer</button>
+            </div>
+        </div>
+    </div>
+
     <!-- App Principal -->
     <div id="appContainer">
-        
-        <!-- Barre de Navigation Horizontale (Haut) -->
         <div class="top-nav">
             <button class="menu-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
             <div class="nav-tabs">
-                <button class="top-tab active" onclick="switchPage('p1', this)">1. Planning</button>
-                <button class="top-tab" onclick="switchPage('p2', this)">2. Collaborateurs</button>
-                <button class="top-tab" onclick="switchPage('p3', this)">3. Génération</button>
-                <button class="top-tab" onclick="switchPage('p4', this)">4. Planning Visite</button>
-                <button class="top-tab" onclick="switchPage('p5', this)">5. Suivi</button>
-                <button class="top-tab" onclick="switchPage('p6', this)">6. Absences</button>
-                <button class="top-tab" onclick="switchPage('p7', this)">7. Dashboard</button>
+                <button class="top-tab active" onclick="switchPage('p1', this)"><i class="fas fa-file-excel"></i> Planning</button>
+                <button class="top-tab" onclick="switchPage('p2', this)"><i class="fas fa-users"></i> Collaborateurs</button>
+                <button class="top-tab" onclick="switchPage('p3', this)"><i class="fas fa-calendar-plus"></i> Génération</button>
+                <button class="top-tab" onclick="switchPage('p4', this)"><i class="fas fa-list-check"></i> Planning généré</button>
+                <button class="top-tab" onclick="switchPage('p5', this)"><i class="fas fa-notes-medical"></i> Suivi</button>
+                <button class="top-tab" onclick="switchPage('p6', this)"><i class="fas fa-user-slash"></i> Absences</button>
+                <button class="top-tab" onclick="switchPage('p7', this)"><i class="fas fa-chart-pie"></i> Dashboard</button>
             </div>
             <div class="user-zone">
                 <div class="user-avatar" id="userAvatar">A</div>
@@ -55,41 +59,41 @@
         </div>
 
         <div class="layout-body">
-            
-            <!-- Barre Latérale Gauche (Imports) -->
             <aside class="sidebar" id="sidebar">
-                <div class="sidebar-header">
-                    <h3><i class="fas fa-folder-open"></i> Importations</h3>
-                </div>
+                <div class="sidebar-header"><h3><i class="fas fa-folder-open"></i> Importations</h3></div>
                 
                 <div class="import-block">
-                    <h4>1. Plannings MC & River</h4>
-                    <input type="file" id="planningFiles" multiple accept=".xlsx, .xls" class="file-input">
-                    <button class="btn-primary small" onclick="uploadFiles('planningFiles', 'planning', 'p1_table_body', 'p1_status')">Importer</button>
+                    <h4><i class="fas fa-calendar-days"></i> Plannings</h4>
+                    <input type="text" id="planning_week_name" placeholder="Nom semaine (ex: S35)" class="form-control" style="margin-bottom: 5px; font-size: 12px; padding: 5px;">
+                    <input type="file" id="planningFiles" multiple accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('planningFiles', 'planning', 'p1_table_body', 'p1_status')"><i class="fas fa-upload"></i> Importer</button>
                     <div id="p1_status" class="status-box small"></div>
                 </div>
 
                 <div class="import-block">
-                    <h4>2. Liste Collaborateurs</h4>
-                    <input type="file" id="collabFiles" accept=".xlsx, .xls" class="file-input">
-                    <button class="btn-primary small" onclick="uploadFiles('collabFiles', 'collab', 'p2_table_body', 'p2_status')">Importer</button>
+                    <h4><i class="fas fa-users"></i> Collaborateurs</h4>
+                    <input type="file" id="collabFiles" accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('collabFiles', 'collab', 'p2_table_body', 'p2_status')"><i class="fas fa-upload"></i> Importer</button>
                     <div id="p2_status" class="status-box small"></div>
                 </div>
 
                 <div class="import-block">
-                    <h4>5. Fichier Suivi (RTA)</h4>
-                    <input type="file" id="suiviFiles" accept=".xlsx, .xls" class="file-input">
-                    <button class="btn-primary small" onclick="uploadFiles('suiviFiles', 'suivi', 'p5_table_body', 'p5_status')">Importer</button>
+                    <h4><i class="fas fa-notes-medical"></i> Fichier Suivi (RTA)</h4>
+                    <input type="file" id="suiviFiles" accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('suiviFiles', 'suivi', 'p5_table_body', 'p5_status')"><i class="fas fa-upload"></i> Importer</button>
                     <div id="p5_status" class="status-box small"></div>
                 </div>
             </aside>
 
-            <!-- Contenu Principal (Droite) -->
             <main class="main-content">
                 
                 <!-- Page 1 -->
                 <div id="page-p1" class="page-content active">
                     <div class="page-header"><h1>Planning MC & River</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="refreshData('planning', 'p1_table_body', 'p1_status')"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('planning')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
                     <div class="card">
                         <div class="table-container">
                             <table id="p1_table">
@@ -103,6 +107,10 @@
                 <!-- Page 2 -->
                 <div id="page-p2" class="page-content">
                     <div class="page-header"><h1>Liste des Collaborateurs</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="refreshData('collab', 'p2_table_body', 'p2_status')"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('collab')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
                     <div class="card">
                         <div class="table-container">
                             <table id="p2_table">
@@ -113,10 +121,9 @@
                     </div>
                 </div>
 
-                <!-- Page 3 : Génération -->
+                <!-- Page 3 -->
                 <div id="page-p3" class="page-content">
                     <div class="page-header"><h1>Génération Planning Visite</h1></div>
-                    
                     <div class="card gen-form-card">
                         <div class="form-row">
                             <div class="form-group">
@@ -124,23 +131,16 @@
                                 <select id="week_select" onchange="updateWeekDates()"></select>
                             </div>
                         </div>
-
-                        <div class="days-grid" id="days_grid">
-                            <!-- Généré par JS -->
-                        </div>
-
-                        <button class="btn-primary" onclick="generatePlanning()" style="margin-top: 20px; width: 100%;">
-                            <i class="fas fa-rocket"></i> Générer la planification
-                        </button>
+                        <div class="days-grid" id="days_grid"></div>
+                        <button class="btn-primary" onclick="generatePlanning()" style="margin-top: 20px; width: 100%;"><i class="fas fa-rocket"></i> Générer la planification</button>
                         <div id="p3_status" class="status-box" style="margin-top: 15px;"></div>
                     </div>
-
                     <div class="card" style="margin-top: 20px;">
                         <div class="card-header">Personnes planifiées</div>
                         <div class="table-container">
                             <table id="p3_table">
-                                <thead><tr><th>WORKDAY ID</th><th>Nom</th><th>Projet</th><th>Date Visite</th><th>Créneau</th><th>Priorité</th></tr></thead>
-                                <tbody id="p3_table_body"><tr><td colspan="6" class="empty-msg">Aucune planification générée.</td></tr></tbody>
+                                <thead></thead>
+                                <tbody id="p3_table_body"><tr><td class="empty-msg">Aucune planification générée.</td></tr></tbody>
                             </table>
                         </div>
                     </div>
@@ -148,13 +148,17 @@
 
                 <!-- Page 4 -->
                 <div id="page-p4" class="page-content">
-                    <div class="page-header"><h1>Planning Visite Global</h1></div>
-                    <div class="card"><div class="card-body"><p>Données globales (À venir)</p></div></div>
+                    <div class="page-header"><h1>Planning généré</h1></div>
+                    <div class="card"><div class="card-body"><p>Vue globale du planning généré (À venir)</p></div></div>
                 </div>
 
                 <!-- Page 5 -->
                 <div id="page-p5" class="page-content">
                     <div class="page-header"><h1>Fichier Suivi (RTA)</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="refreshData('suivi', 'p5_table_body', 'p5_status')"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('suivi')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
                     <div class="card">
                         <div class="table-container">
                             <table id="p5_table">
@@ -167,12 +171,15 @@
 
                 <!-- Page 6 -->
                 <div id="page-p6" class="page-content">
-                    <div class="page-header"><h1>Suivi des Absences</h1></div>
+                    <div class="page-header"><h1>Absences</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="loadAbsences()"><i class="fas fa-sync"></i> Actualiser</button>
+                    </div>
                     <div class="card">
                         <div class="table-container">
                             <table id="p6_table">
                                 <thead></thead>
-                                <tbody id="p6_table_body"><tr><td class="empty-msg">Cliquez sur l'onglet pour charger les données.</td></tr></tbody>
+                                <tbody id="p6_table_body"><tr><td class="empty-msg">Cliquez sur Actualiser pour charger.</td></tr></tbody>
                             </table>
                         </div>
                     </div>
@@ -181,56 +188,38 @@
                 <!-- Page 7 -->
                 <div id="page-p7" class="page-content">
                     <div class="page-header"><h1>Dashboard & Extractions</h1></div>
-                    
                     <div class="cards-grid" id="p7_metrics" style="margin-bottom: 20px;">
                         <div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>
                     </div>
-                    
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">1. Total à passer vs Planifié par projet</div>
                         <div id="chart1_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
-
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">2. Planifié vs Visite effectuée vs Absents/Reporté</div>
                         <div id="chart2_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
-
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">3. Avancement Global</div>
                         <div id="chart3_div" style="width:100%; min-height:400px; padding: 15px; display: flex; justify-content: center;"></div>
                     </div>
-                    
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">Durée moyenne par jour</div>
-                        <div class="table-container">
-                            <table id="p7_avg_table">
-                                <thead></thead>
-                                <tbody id="p7_avg_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody>
-                            </table>
-                        </div>
+                        <div class="table-container"><table id="p7_avg_table"><thead></thead><tbody id="p7_avg_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
-
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">Top 5 des durées les plus élevées</div>
-                        <div class="table-container">
-                            <table id="p7_top5_table">
-                                <thead></thead>
-                                <tbody id="p7_top5_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody>
-                            </table>
-                        </div>
+                        <div class="table-container"><table id="p7_top5_table"><thead></thead><tbody id="p7_top5_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
-
                     <div class="card">
                         <div class="card-header">Liste des visites effectuées (OK)</div>
-                        <div class="table-container">
-                            <table id="p7_done_table">
-                                <thead></thead>
-                                <tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody>
-                            </table>
-                        </div>
+                        <div class="table-container"><table id="p7_done_table"><thead></thead><tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
                 </div>
+
+            </main>
+        </div>
+    </div>
 
     <script src="/static/app.js"></script>
 </body>
