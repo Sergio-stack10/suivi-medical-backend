@@ -336,9 +336,9 @@ async function loadDashboard() {
         
         metricsDiv.innerHTML = `
             <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
-            <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
             <div class="metric-card"><div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div><div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div></div>
-            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-times-circle"></i></div><div class="metric-info"><h3>${m.total_absent || 0}</h3><p>Absents</p></div></div>
+            <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
+            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste_a_planifier || 0}</h3><p>Reste à planifier</p></div></div>
         `;
         
         renderDynamicTable(result.avg_duration, 'p7_avg_body');
@@ -352,21 +352,24 @@ async function loadDashboard() {
             Plotly.purge(chart2Div);
             Plotly.purge(chart3Div);
             
+            // Graphique 1 : Total, Planifié, Visite effectuée
             const c1 = result.charts.chart1;
             if (c1 && c1.length > 0) {
-                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside' };
+                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside' };
                 const t2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'outside' };
-                Plotly.newPlot(chart1Div, [t1, t2], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
+                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Visite effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'outside' };
+                Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
             } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
+            // Graphique 2 : Planifié vs Absent par Date
             const c2 = result.charts.chart2;
             if (c2 && c2.length > 0) {
-                const t1 = { x: c2.map(d=>d.project), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside' };
-                const t2 = { x: c2.map(d=>d.project), y: c2.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c2.map(d=>d.faite), textposition: 'outside' };
-                const t3 = { x: c2.map(d=>d.project), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside' };
-                Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
+                const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside' };
+                const t2 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent/Reporté', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside' };
+                Plotly.newPlot(chart2Div, [t1, t2], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
+            // Graphique 3 (Camembert)
             const c3 = result.charts.chart3;
             if (c3 && (c3.effectuee + c3.reste + c3.non_planifie > 0)) {
                 const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
