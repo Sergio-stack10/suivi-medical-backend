@@ -538,7 +538,7 @@ async def get_absences():
 async def get_dashboard():
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
-        return {"metrics": {}, "avg_duration": [], "top5": []}
+        return {"metrics": {}, "avg_duration": [], "top5": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
     
     med_df = rta_data.copy()
     
@@ -575,6 +575,37 @@ async def get_dashboard():
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
     
+    # --- DONNÉES POUR LES GRAPHIQUES ---
+    chart1_data = []
+    chart2_data = []
+    if not med_df.empty:
+        g1_df = med_df.copy()
+        g1_df['Statut Graph'] = g1_df['Statut Visite'].astype(str).apply(lambda x: 'Planifié' if str(x).strip().lower() in ['planifié', 'planifie'] else 'Non Planifié')
+        counts_df = g1_df.groupby(['Projet_Affichage', 'Statut Graph']).size().unstack(fill_value=0).reset_index()
+        for col in ['Planifié', 'Non Planifié']:
+            if col not in counts_df.columns: counts_df[col] = 0
+        counts_df['Total'] = counts_df['Planifié'] + counts_df['Non Planifié']
+        counts_df = counts_df.sort_values('Total', ascending=False)
+        
+        for _, row in counts_df.iterrows():
+            chart1_data.append({"project": str(row['Projet_Affichage']), "total": int(row['Total']), "planifie": int(row['Planifié'])})
+            
+        project_order = med_df['Projet_Affichage'].value_counts().index.tolist()
+        for proj in project_order:
+            proj_df = med_df[med_df['Projet_Affichage'] == proj]
+            planifie_count = len(proj_df[proj_df['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie'])])
+            com_lower = proj_df['Commentaire'].astype(str).str.lower()
+            faite_count = len(proj_df[com_lower.str.contains('ok', na=False)])
+            abs_count = len(proj_df[com_lower.str.contains('absent|report', na=False)])
+            if planifie_count + faite_count + abs_count > 0:
+                chart2_data.append({"project": proj, "planifie": planifie_count, "faite": faite_count, "absent": abs_count})
+
+    chart3_data = {
+        "effectuee": total_fait,
+        "reste": max(0, total_planifie - total_fait),
+        "non_planifie": max(0, total_a_passer - total_planifie)
+    }
+
     # Durée moyenne par jour
     med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
@@ -597,5 +628,10 @@ async def get_dashboard():
     return {
         "metrics": metrics,
         "avg_duration": avg_duration,
-        "top5": top5
+        "top5": top5,
+        "charts": {
+            "chart1": chart1_data,
+            "chart2": chart2_data,
+            "chart3": chart3_data
+        }
     }
