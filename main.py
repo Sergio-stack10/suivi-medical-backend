@@ -392,27 +392,37 @@ async def delete_data(category: str):
 
 @app.get("/api/weeks")
 async def get_weeks():
-    return {"weeks": list(app_state['plannings'].keys())}
+    weeks_data = []
+    for wk, df in app_state['plannings'].items():
+        dates_map = get_dates_from_week(wk)
+        weeks_data.append({
+            "name": wk,
+            "dates": [dates_map[j].strftime('%Y-%m-%d') for j in jours[:5]]
+        })
+    return {"weeks": weeks_data}
 
 @app.get("/api/generated")
 async def get_generated():
     med_list = app_state.get('medical_list')
     if med_list is None: return {"data": []}
-    planned = med_list[med_list['Statut Visite'] == 'Planifié'].copy()
+    # Retourne tous ceux qui ont une date de visite assignée
+    mask = med_list['Date Visite'].notna()
+    planned = med_list[mask].copy()
     planned['Date Visite'] = planned['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
-    planned['Créneau Visite'] = planned['Créneau Visite'].dt.strftime('%H:%M').fillna('')
-    return {"data": clean_for_json(planned[['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])}
+    planned['Créneau Visite'] = pd.to_datetime(planned['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
+    return {"data": clean_for_json(planned[['WORKDAY ID', 'Nom', 'Projet', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])}
 
 @app.post("/api/unplan")
 async def unplan_all():
     med_list = app_state.get('medical_list')
     if med_list is not None:
-        med_list.loc[med_list['Statut Visite'] == 'Planifié', 'Statut Visite'] = 'Non Planifié'
-        med_list.loc[med_list['Statut Visite'] == 'Non Planifié', 'Date Visite'] = pd.NaT
-        med_list.loc[med_list['Statut Visite'] == 'Non Planifié', 'Créneau Visite'] = pd.NaT
+        mask = med_list['Date Visite'].notna()
+        med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
+        med_list.loc[mask, 'Date Visite'] = pd.NaT
+        med_list.loc[mask, 'Créneau Visite'] = pd.NaT
         app_state['medical_list'] = med_list
         save_history()
-    return {"message": "Planifications effacées."}
+    return {"message": "Toutes les planifications ont été effacées."}
 
 @app.post("/api/generate")
 async def generate_planning(config: str = Form(...)):
@@ -640,7 +650,8 @@ async def export_data(category: str):
             df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     elif category == 'generated':
         med_list = app_state.get('medical_list')
-        if med_list is not None: df = med_list[med_list['Statut Visite'] == 'Planifié'].copy()
+        if med_list is not None:
+            df = med_list[med_list['Date Visite'].notna()].copy()
 
     if df is None or df.empty: return {"error": "Aucune donnée à exporter"}
 
