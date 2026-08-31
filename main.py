@@ -253,25 +253,41 @@ def parse_liste_visite(filename: str, content: bytes):
     return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
 
 def parse_rta_file(filename: str, content: bytes):
-    engine = get_excel_engine(filename)
-    xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
-    sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
-    if not sheet_name: return None
+    try:
+        engine = get_excel_engine(filename)
+        xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+        sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
+        if not sheet_name: return None
+            
+        df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, engine=engine)
+        df = df.loc[:, ~df.columns.duplicated()]
         
-    df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, engine=engine)
-    df = df.loc[:, ~df.columns.duplicated()]
-    cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
-    df.columns = cols_cleaned
-    rename_map = {'WORKDAY ID': 'WORKDAY ID', 'NOM': 'Nom', 'PRENOM': 'Prénom', 'STATUT VISITE': 'Statut Visite', 'DATE VISITE': 'Date Visite', 'HEURE DEPART': 'Heure Départ', 'HEURE RETOUR': 'Heure Retour', 'COMMENTAIRES': 'Commentaire', 'DUREE': 'Durée', 'PROJET': 'Projet'}
-    current_renames = {k: v for k, v in rename_map.items() if k in df.columns}
-    df = df.rename(columns=current_renames)
-    df = df.loc[:, ~df.columns.duplicated()]
-    df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
-    if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
-    if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
-    if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
-    if 'WORKDAY ID' in df.columns: df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
-    return df
+        cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
+        df.columns = cols_cleaned
+        
+        rename_map = {'WORKDAY ID': 'WORKDAY ID', 'NOM': 'Nom', 'PRENOM': 'Prénom', 'STATUT VISITE': 'Statut Visite', 'DATE VISITE': 'Date Visite', 'HEURE DEPART': 'Heure Départ', 'HEURE RETOUR': 'Heure Retour', 'COMMENTAIRES': 'Commentaire', 'DUREE': 'Durée', 'PROJET': 'Projet'}
+        current_renames = {k: v for k, v in rename_map.items() if k in df.columns}
+        df = df.rename(columns=current_renames)
+        df = df.loc[:, ~df.columns.duplicated()]
+        
+        # On remplace les valeurs nulles AVANT de convertir les dates (évite le crash)
+        df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
+        
+        # On convertit en date/heure en mode "sécurisé"
+        if 'Date Visite' in df.columns:
+            df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
+        if 'Heure Départ' in df.columns:
+            df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
+        if 'Heure Retour' in df.columns:
+            df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
+                
+        if 'WORKDAY ID' in df.columns:
+            df['WORKDAY ID'] = df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", "").str.upper()
+            
+        return df
+    except Exception as e:
+        print(f"ERREUR LECTURE RTA: {e}")
+        return None
 
 # ==========================================
 # API ENDPOINTS
@@ -321,6 +337,8 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             
         elif category == 'suivi':
             df = parse_rta_file(files_data[0][0], files_data[0][1])
+            if df is None:
+                return {"message": "❌ Erreur: Le fichier RTA est illisible ou vide."}
             app_state['rta_data'] = df
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
             
