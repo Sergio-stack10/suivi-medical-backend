@@ -145,6 +145,37 @@ def clean_for_json(df):
     
     # 3. On utilise la méthode native de Pandas qui gère parfaitement les NaN/NaT
     return json.loads(df.to_json(orient='records'))
+# ==========================================
+# FONCTIONS DE CALCUL (Pour le Dashboard)
+# ==========================================
+def get_mapped_project(projet):
+    p = str(projet)
+    mapping = {
+        '18431': 'ORG ATH', '16187': 'BTL AT', '18354': 'AC', '16294': 'TE FOC', '21548': 'BKM POLY', '17042': 'CPR', '17439': 'FB', '25641': 'SHI', '16152': 'ORG HD', '22280': 'AY', '16315': 'MF', '18142': 'BB', '16872': 'CST', '16334': 'C+ INT', '12777': 'PF', '16873': 'BF', '17139': 'LP', '17056': 'ZAL TMM', '21565': 'SBX', '17057': 'VP SC', '16808': 'RRG', '16669': 'IZI', '17178': 'BKM', '17060': 'AUC', '11836': 'DRM', '11834': '3DS', '16966': 'LC', '16643': 'ZAL TNR', '24323': 'LYX', '16950': 'DB TMM', '17534': 'TRP', '17914': 'ZP', '16999': 'TII', '16412': 'HP', '16952': 'BTL DIG', '17429': 'GRA', '18175': 'RCI MG', '17230': 'JTR', '21550': 'CPR BE', '18338': 'MZ', '17130': 'MO', '24158': 'YK', '12480': 'C+ FR', '11753': 'VAL', '13966': 'H&H', '17401': '24S', '16571': 'TRK', '25659': 'ZAL DE', '11733': 'BF POLY', '23126': 'STC', '24474': 'CNX', '23404': 'C2B', '17567': 'POL', '26711': 'ADV', '24241': 'OPEX', '17043': 'DB TNR', '16827': 'LBC', '18013': 'BA', '16897': 'LC ANT', '16953': 'STY', '16437': 'ORG PRT', '18418': 'RIV TMM', '16352': 'RIV UK TMM', '17131': 'FLT', '18345': 'RIV ANT', '16351': 'RIV UK ANT', '26044': 'CNX', '980005758': 'LEAD', '980010299': 'ZPL', '2517': 'RECRU'
+    }
+    for k, v in mapping.items():
+        if p.startswith(k): return v
+    
+    str_mappings = {
+        'Depot Bingo Polyglot': 'DEPOT BINGO POLYGLOT', 'Gallinée': 'GALLINÉE', 'Direct Energie BOC': 'DIRECT ENERGIE BOC', 'Hostnfly': 'HOSTNFLY', 'TK Home Solutions': 'TK HOME SOLUTIONS', '4165 Piana': 'PIANA', 'Hellowork': 'HELLOWORK', 'Lydia': 'LYDIA', 'Club Funding': 'CLUB FUNDING', 'Wengo': 'WENGO', 'Califrais': 'CALIFRAIS', 'Joko': 'JOKO CUSTOMER CARE', 'WorlRemit': 'WORLREMIT', '4132 SENDWAVE': 'SENDWAVE', 'Tiiko': 'TIIKO', 'COLISEE': 'COLISEE', 'ENI SC': 'ENI SC', 'OMEO': 'OMEO', 'WORLDR SENDWAVE': 'WORLDR SENDWAVE', 'GPASPLUS': 'GPASPLUS', 'Footovision': 'FOOTOVISION', 'Sika Webhelp': 'SIKA WEBHELP OD', 'Tuffy Wall': 'TUFFY WALL', 'DOMISERVE': 'DOMISERVE', '22409 - Pnp': 'PNP TMM', '22432 - Other': 'OTHER', '22409 - Other': 'OTHER', '21317 - Legalplace': 'LEGALPLACE', '16679 - Gexel': 'GEXEL', '2921 - Originenergy': 'ORIGINENERGY', '23330 - Opexother': 'OPEXOTHER', '23776 - Other': 'OTHER', '14309 - Bytedance': 'BYTEDANCE', '4125 - Ceaa': 'CEAA', '24818 - Power Fleet': 'POWERFLEET', '12229 - Other': 'OTHER', '12230 - Other': 'OTHER', 'WHFR157 - P_DMS': 'BYTEL DIGITAL', 'WHFR2857 - P_4073': 'RIVER DE', 'WHUS012 - P_Gexel': 'GEXEL', 'WHFR2962 - Piana': 'PIANA', 'WHCRIT225 - A540 P_AL': 'VEEPEE SC', 'WHFR894 - P_TLS SGS': 'SGS', 'WHNL287 - Basic-fit': 'BASIC FIT NL', 'WHFR2963 - Colis Privac': 'COLIS PRIVÉ'
+    }
+    for k, v in str_mappings.items():
+        if k.lower() in p.lower(): return v
+    return p
+
+def get_final_status(row):
+    statut = str(row.get('Statut Visite', '')).lower().strip()
+    com = str(row.get('Commentaire', '')).lower()
+    if 'ok' in com: return 'Visite effectuée'
+    if 'absent' in com or 'report' in com: return 'Absent/Reporté'
+    if statut in ['planifié', 'planifie']: return 'Planifié'
+    return 'Non Planifié'
+
+def format_duration(mins):
+    if pd.isna(mins) or mins == 0: return "0min"
+    h = int(mins // 60)
+    m = int(mins % 60)
+    return f"{h}h {m}min" if h > 0 else f"{m}min"
 
 def parse_planning(files_data: list):
     all_planning = []
@@ -477,3 +508,94 @@ async def generate_planning(config: str = Form(...)):
     except Exception as e:
         print("ERREUR GÉNÉRATION:", traceback.format_exc())
         return {"message": f"❌ Erreur génération: {str(e)}"}
+# ==========================================
+# API POUR LA PAGE 6 (ABSENCES)
+# ==========================================
+@app.get("/api/absences")
+async def get_absences():
+    rta_data = app_state.get('rta_data')
+    if rta_data is None or rta_data.empty:
+        return {"data": []}
+    df = rta_data.copy()
+    if 'Statut Visite' not in df.columns: df['Statut Visite'] = ''
+    if 'Commentaire' not in df.columns: df['Commentaire'] = ''
+    mask = df['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | \
+                   df['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
+    abs_df = df[mask].copy()
+    if 'Nom' in abs_df.columns and 'Prénom' in abs_df.columns:
+        abs_df['Nom complet'] = abs_df['Nom'].fillna('').astype(str) + ' ' + abs_df['Prénom'].fillna('').astype(str)
+    else: abs_df['Nom complet'] = ''
+    show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Commentaire']
+    show_cols = [c for c in show_cols if c in abs_df.columns]
+    if 'Date Visite' in abs_df.columns:
+        abs_df['Date Visite'] = pd.to_datetime(abs_df['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+    return {"data": clean_for_json(abs_df[show_cols])}
+
+# ==========================================
+# API POUR LA PAGE 7 (DASHBOARD)
+# ==========================================
+@app.get("/api/dashboard")
+async def get_dashboard():
+    rta_data = app_state.get('rta_data')
+    if rta_data is None or rta_data.empty:
+        return {"metrics": {}, "avg_duration": [], "top5": []}
+    
+    med_df = rta_data.copy()
+    
+    if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
+        med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
+        med_df['Heure Retour'] = pd.to_datetime(med_df['Heure Retour'].astype(str), errors='coerce')
+        med_df['Durée (min)'] = (med_df['Heure Retour'] - med_df['Heure Départ']).dt.total_seconds() / 60
+        med_df.loc[med_df['Durée (min)'] < 0, 'Durée (min)'] = np.nan 
+    else:
+        med_df['Durée (min)'] = np.nan
+        
+    if 'Projet' in med_df.columns:
+        med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
+    else:
+        med_df['Projet_Affichage'] = 'N/A'
+        
+    for col in ['Statut Visite', 'Commentaire', 'Nom', 'Prénom', 'Date Visite']:
+        if col not in med_df.columns: med_df[col] = ''
+        
+    med_df['Graph Status'] = med_df.apply(get_final_status, axis=1)
+    
+    total_a_passer = len(med_df)
+    condition_fait = med_df['Graph Status'] == 'Visite effectuée'
+    condition_abs = med_df['Graph Status'] == 'Absent/Reporté'
+    total_fait = len(med_df[condition_fait])
+    total_planifie = len(med_df[med_df['Statut Visite'].astype(str).str.lower().isin(['planifié', 'planifie'])])
+    total_absent = len(med_df[condition_abs])
+    
+    metrics = {
+        "total_a_passer": total_a_passer,
+        "total_fait": total_fait,
+        "total_planifie": total_planifie,
+        "total_absent": total_absent,
+        "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
+    }
+    
+    # Durée moyenne par jour
+    med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
+    avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
+    avg_duration = []
+    if not avg_df.empty:
+        avg_df['Durée Moyenne'] = avg_df['Durée (min)'].apply(format_duration)
+        avg_df['Date'] = avg_df['Date'].astype(str)
+        avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
+        
+    # Top 5
+    top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
+    top5 = []
+    if not top5_df.empty:
+        top5_df['Heure Départ'] = top5_df['Heure Départ'].dt.strftime('%H:%M')
+        top5_df['Heure Retour'] = top5_df['Heure Retour'].dt.strftime('%H:%M')
+        top5_df['Durée'] = top5_df['Durée (min)'].apply(format_duration)
+        top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
+        top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
+        
+    return {
+        "metrics": metrics,
+        "avg_duration": avg_duration,
+        "top5": top5
+    }
