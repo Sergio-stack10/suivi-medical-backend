@@ -169,7 +169,9 @@ async function loadWeeks() {
         }
         data.weeks.forEach(week => {
             const option = document.createElement('option');
-            option.value = week; option.innerText = week;
+            option.value = week.name;
+            option.innerText = week.name;
+            option.dataset.dates = JSON.stringify(week.dates);
             select.appendChild(option);
         });
         updateWeekDates();
@@ -177,24 +179,19 @@ async function loadWeeks() {
 }
 
 function updateWeekDates() {
-    const weekName = document.getElementById('week_select').value;
+    const select = document.getElementById('week_select');
+    const weekName = select.value;
     if (!weekName) return;
-    const match = weekName.match(/\d+/);
-    if (!match) return;
-    const weekNum = parseInt(match[0]);
     
-    const year = new Date().getFullYear();
-    const monday = new Date(Date.UTC(year, 0, 1 + (weekNum - 1) * 7));
-    while (monday.getUTCDay() !== 1) monday.setUTCDate(monday.getUTCDate() + 1);
+    const selectedOption = select.options[select.selectedIndex];
+    const dates = JSON.parse(selectedOption.dataset.dates || '[]');
     
     const daysGrid = document.getElementById('days_grid');
     daysGrid.innerHTML = '';
     const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
     
     for (let i = 0; i < 5; i++) {
-        const date = new Date(monday);
-        date.setUTCDate(monday.getUTCDate() + i);
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = dates[i] || new Date().toISOString().split('T')[0];
         
         const card = document.createElement('div');
         card.className = 'day-card';
@@ -209,6 +206,14 @@ function updateWeekDates() {
             <div class="day-input-group"><label>Statut</label><select class="form-control"><option>Tous</option><option>CC</option><option>ENC</option></select></div>
         `;
         daysGrid.appendChild(card);
+    }
+}
+
+async function unplanAll() {
+    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications (dates de visites assignées) ?')) {
+        await fetch('/api/unplan', { method: 'POST' });
+        loadGenerated(); // Recharge P3 et P4
+        alert("Planifications effacées.");
     }
 }
 
