@@ -128,13 +128,23 @@ def calculate_anciennete_num(hire_date_str):
         return max(0, months)
     except: return 0
 
+import json
+
 def clean_for_json(df):
+    """Fonction blindée pour convertir un DataFrame Pandas en dictionnaire valide pour le web."""
     if df is None or df.empty: return []
-    df = df.fillna('')
+    
+    df = df.copy()
+    # 1. On formate toutes les dates en texte propre (dd/mm/yyyy)
     for col in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].astype(str).replace('NaT', '')
-    return df.astype(str).replace({'NaT': '', 'None': '', 'nan': ''}).to_dict('records')
+            df[col] = df[col].dt.strftime('%d/%m/%Y').fillna('')
+            
+    # 2. On remplace les valeurs infinies par des vides
+    df = df.replace([np.inf, -np.inf], np.nan)
+    
+    # 3. On utilise la méthode native de Pandas qui gère parfaitement les NaN/NaT
+    return json.loads(df.to_json(orient='records'))
 
 def parse_planning(files_data: list):
     all_planning = []
