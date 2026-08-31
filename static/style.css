@@ -36,11 +36,12 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; }
 .nav-tabs { display: flex; gap: 5px; overflow-x: auto; }
 .top-tab { background: none; border: none; color: rgba(255,255,255,0.6); padding: 10px 15px; border-radius: 8px; cursor: pointer; white-space: nowrap; font-size: 14px; }
 .top-tab.active { background: #003D5B; color: white; }
+.top-tab i { margin-right: 5px; }
 .user-zone { margin-left: auto; display: flex; align-items: center; gap: 10px; color: white; }
 .user-avatar { width: 35px; height: 35px; background: #25E2CC; color: #002032; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 .logout-btn-top { background: none; border: none; color: #ff6b6b; font-size: 18px; cursor: pointer; }
 
-.layout-body { display: flex; flex: 1; overflow: hidden; }
+.layout-body { display: flex; flex: 1; overflow: hidden; padding-bottom: 40px; /* Espace pour footer */ }
 .sidebar { width: 300px; background: white; height: 100%; overflow-y: auto; padding: 20px; box-shadow: 2px 0 10px rgba(0,0,0,0.05); transition: transform 0.3s; }
 .sidebar.hidden { transform: translateX(-100%); position: absolute; height: calc(100% - 60px); z-index: 99; }
 .sidebar-header { margin-bottom: 20px; }
@@ -59,6 +60,8 @@ body { background-color: #f4f7f6; color: #333; overflow: hidden; }
 .btn-icon:hover { background: #f0f0f0; }
 .btn-icon.danger { color: #ff6b6b; border-color: #ffcccc; }
 .btn-icon.danger:hover { background: #fff0f0; }
+.btn-icon.export { color: #25E2CC; border-color: #ccffff; }
+.btn-icon.export:hover { background: #f0ffff; }
 
 .card { background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 20px; }
 .card-header { background: #003D5B; color: white; padding: 15px 25px; font-weight: 600; }
@@ -98,3 +101,10 @@ tr:hover { background: #f9f9f9; }
 .metric-icon { width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: white; }
 .metric-icon.blue { background: #003D5B; } .metric-icon.green { background: #25E2CC; } .metric-icon.orange { background: #FBCA18; } .metric-icon.red { background: #FF6B6B; }
 .metric-info h3 { font-size: 24px; color: #333; } .metric-info p { font-size: 13px; color: #777; }
+
+/* Signature Footer */
+.footer-fix {
+    position: fixed; left: 0; bottom: 0; width: 100%;
+    background-color: #001a26; color: #A8F3EB; text-align: center;
+    font-size: 12px; padding: 8px; z-index: 999999; border-top: 2px solid #25E2CC;
+}
