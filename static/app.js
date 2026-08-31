@@ -51,6 +51,12 @@ function handleLogout() {
 // ==========================================
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('hidden');
+    // Forcer Plotly à recalculer la taille des graphiques
+    setTimeout(() => {
+        if (document.getElementById('chart1_div')) Plotly.Plots.resize('chart1_div');
+        if (document.getElementById('chart2_div')) Plotly.Plots.resize('chart2_div');
+        if (document.getElementById('chart3_div')) Plotly.Plots.resize('chart3_div');
+    }, 300);
 }
 
 function switchPage(pageId, element) {
@@ -345,7 +351,7 @@ async function loadDashboard() {
             if (c1 && c1.length > 0) {
                 const trace1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'auto' };
                 const trace2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'auto' };
-                Plotly.newPlot(chart1Div, [trace1, trace2], {...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}});
+                Plotly.newPlot(chart1Div, [trace1, trace2], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
             } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
             // Chart 2
@@ -377,4 +383,7 @@ async function loadDashboard() {
         console.error(e);
         metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur</h3></div></div>';
     }
+            // Affichage Liste Visites OK
+        const doneVisites = result.done_visites || [];
+        renderDynamicTable(doneVisites, 'p7_done_body');
 }
