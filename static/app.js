@@ -346,34 +346,37 @@ async function loadDashboard() {
         renderDynamicTable(result.done_visites, 'p7_done_body');
         
         if (result.charts) {
-            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
+            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, barmode: 'group' };
             
             Plotly.purge(chart1Div);
             Plotly.purge(chart2Div);
             Plotly.purge(chart3Div);
             
-            // Graphique 1 : Total, Planifié, Visite effectuée
+            // Graphique 1 : Total à passer | Planifié + Effectuée
             const c1 = result.charts.chart1;
             if (c1 && c1.length > 0) {
+                const planifie_arr = c1.map(d => d.planifie);
                 const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside' };
-                const t2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'outside' };
-                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Visite effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'outside' };
-                Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
+                const t2 = { x: c1.map(d=>d.project), y: planifie_arr, type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: planifie_arr, textposition: 'outside', offsetgroup: '1' };
+                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '1', base: planifie_arr };
+                Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
             } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-            // Graphique 2 : Planifié vs Absent par Date
+            // Graphique 2 : Planifié | Effectuée + Absent
             const c2 = result.charts.chart2;
             if (c2 && c2.length > 0) {
+                const faite_arr = c2.map(d => d.faite);
                 const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside' };
-                const t2 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent/Reporté', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside' };
-                Plotly.newPlot(chart2Div, [t1, t2], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
+                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '2' };
+                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '2', base: faite_arr };
+                Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
             // Graphique 3 (Camembert)
             const c3 = result.charts.chart3;
             if (c3 && (c3.effectuee + c3.reste + c3.non_planifie > 0)) {
                 const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
-                Plotly.newPlot(chart3Div, data3, {...layout, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}});
+                Plotly.newPlot(chart3Div, data3, {...layout, barmode: null, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}});
             } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
         }
     } catch(e) {
