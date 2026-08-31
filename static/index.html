@@ -8,6 +8,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+        <!-- Ajout de Plotly pour les graphiques -->
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
 </head>
 <body>
 
@@ -182,6 +184,21 @@
                     
                     <div class="cards-grid" id="p7_metrics" style="margin-bottom: 20px;">
                         <div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>
+                    </div>
+                    
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">1. Total à passer vs Planifié par projet</div>
+                        <div id="chart1_div" style="width:100%; min-height:400px; padding: 15px;"></div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">2. Planifié vs Visite effectuée vs Absents/Reporté</div>
+                        <div id="chart2_div" style="width:100%; min-height:400px; padding: 15px;"></div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">3. Avancement Global</div>
+                        <div id="chart3_div" style="width:100%; min-height:400px; padding: 15px; display: flex; justify-content: center;"></div>
                     </div>
                     
                     <div class="card">
