@@ -292,10 +292,14 @@ async function loadDashboard() {
     const metricsDiv = document.getElementById('p7_metrics');
     const avgBody = document.getElementById('p7_avg_body');
     const top5Body = document.getElementById('p7_top5_body');
+    const chart1Div = document.getElementById('chart1_div');
+    const chart2Div = document.getElementById('chart2_div');
+    const chart3Div = document.getElementById('chart3_div');
     
     metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
-    if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Chargement du graphique...</p>';
+    chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Chargement du graphique...</p>';
+    chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Chargement du graphique...</p>';
 
     try {
         const res = await fetch('/api/dashboard');
@@ -331,6 +335,43 @@ async function loadDashboard() {
 
         // Affichage Top 5
         renderDynamicTable(result.top5, 'p7_top5_body');
+        
+        // Affichage des Graphiques
+        if (result.charts) {
+            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
+            
+            // Chart 1
+            const c1 = result.charts.chart1;
+            if (c1 && c1.length > 0) {
+                const trace1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'auto' };
+                const trace2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'auto' };
+                Plotly.newPlot(chart1Div, [trace1, trace2], {...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}});
+            } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+
+            // Chart 2
+            const c2 = result.charts.chart2;
+            if (c2 && c2.length > 0) {
+                const t1 = { x: c2.map(d=>d.project), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' } };
+                const t2 = { x: c2.map(d=>d.project), y: c2.map(d=>d.faite), type: 'bar', name: 'Visite effectuée', marker: { color: '#25E2CC' } };
+                const t3 = { x: c2.map(d=>d.project), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent/Reporté', marker: { color: '#FBCA18' } };
+                Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
+            } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+
+            // Chart 3 (Camembert)
+            const c3 = result.charts.chart3;
+            if (c3 && (c3.effectuee + c3.reste + c3.non_planifie > 0)) {
+                const data3 = [{
+                    values: [c3.effectuee, c3.reste, c3.non_planifie],
+                    labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'],
+                    type: 'pie',
+                    hole: 0.6,
+                    marker: { colors: ['#25E2CC', '#003D5B', '#747474'] },
+                    textinfo: 'label+percent',
+                    textposition: 'outside'
+                }];
+                Plotly.newPlot(chart3Div, data3, {...layout, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}});
+            } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+        }
         
     } catch(e) {
         console.error(e);
