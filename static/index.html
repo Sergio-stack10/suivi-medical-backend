@@ -165,22 +165,45 @@
 
                 <!-- Page 6 -->
                 <div id="page-p6" class="page-content">
-                    <div class="page-header"><h1>Absences</h1></div>
-                    <div class="card"><div class="card-body"><p>Filtre des absents (À venir)</p></div></div>
+                    <div class="page-header"><h1>Suivi des Absences</h1></div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p6_table">
+                                <thead></thead>
+                                <tbody id="p6_table_body"><tr><td class="empty-msg">Cliquez sur l'onglet pour charger les données.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Page 7 -->
                 <div id="page-p7" class="page-content">
-                    <div class="page-header"><h1>Dashboard</h1></div>
-                    <div class="cards-grid">
-                        <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>0</h3><p>Total à passer</p></div></div>
-                        <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>0</h3><p>Visites effectuées</p></div></div>
+                    <div class="page-header"><h1>Dashboard & Extractions</h1></div>
+                    
+                    <div class="cards-grid" id="p7_metrics" style="margin-bottom: 20px;">
+                        <div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">Durée moyenne par jour</div>
+                        <div class="table-container">
+                            <table id="p7_avg_table">
+                                <thead></thead>
+                                <tbody id="p7_avg_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 20px;">
+                        <div class="card-header">Top 5 des durées les plus élevées</div>
+                        <div class="table-container">
+                            <table id="p7_top5_table">
+                                <thead></thead>
+                                <tbody id="p7_top5_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-
-            </main>
-        </div>
-    </div>
 
     <script src="/static/app.js"></script>
 </body>
