@@ -52,13 +52,14 @@ function switchPage(pageId, element) {
     document.querySelectorAll('.top-tab').forEach(btn => btn.classList.remove('active'));
     document.getElementById('page-' + pageId).classList.add('active');
     element.classList.add('active');
-    if (pageId === 'p3') loadWeeks();
+    if (pageId === 'p3') { loadWeeks(); loadGenerated(); }
+    if (pageId === 'p4') { loadGenerated(); }
     if (pageId === 'p6') loadAbsences();
     if (pageId === 'p7') loadDashboard();
 }
 
 // ==========================================
-// DATA MANAGEMENT (Modal & Delete)
+// DATA MANAGEMENT (Modal, Delete, Export)
 // ==========================================
 function showDeleteModal(category) {
     deleteTarget = category;
@@ -76,12 +77,9 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
         const res = await fetch(`/api/delete/${deleteTarget}`, { method: 'DELETE' });
         const result = await res.json();
         alert(result.message);
-        
-        // Vider les tableaux concernés
         if (deleteTarget === 'planning') renderDynamicTable([], 'p1_table_body');
         if (deleteTarget === 'collab') renderDynamicTable([], 'p2_table_body');
         if (deleteTarget === 'suivi') renderDynamicTable([], 'p5_table_body');
-        
         closeModal();
     } catch (e) {
         alert("Erreur lors de la suppression.");
@@ -89,18 +87,8 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
     }
 });
 
-async function refreshData(category, tbodyId, statusId) {
-    const statusMsg = document.getElementById(statusId);
-    statusMsg.innerText = "⏳ Actualisation...";
-    try {
-        // Simuler un réimport pour rafraîchir l'affichage depuis la BDD
-        const res = await fetch(`/api/get_${category}`); // Route fictive, on utilise l'import sans fichier n'est pas possible.
-        // En réalité, pour rafraîchir, on doit juste recharger la page ou stocker les données affichées.
-        // Pour faire simple, on va juste recharger la page.
-        window.location.reload();
-    } catch (e) {
-        statusMsg.innerText = "❌ Erreur.";
-    }
+function exportData(category) {
+    window.location.href = `/api/export/${category}`;
 }
 
 // ==========================================
@@ -119,12 +107,9 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
     for (let i = 0; i < fileInput.files.length; i++) formData.append("files", fileInput.files[i]);
     formData.append("category", category);
     
-    // Ajouter le nom de la semaine si c'est un planning
     if (category === 'planning') {
         const weekInput = document.getElementById('planning_week_name');
-        if (weekInput && weekInput.value) {
-            formData.append('week_name', weekInput.value);
-        }
+        if (weekInput && weekInput.value) formData.append('week_name', weekInput.value);
     }
 
     statusMsg.innerText = "⏳ Traitement...";
@@ -170,7 +155,7 @@ function renderDynamicTable(data, tbodyId) {
 }
 
 // ==========================================
-// PAGE 3 : GÉNÉRATION
+// PAGE 3 & 4 : GÉNÉRATION & PLANNING GÉNÉRÉ
 // ==========================================
 async function loadWeeks() {
     try {
@@ -230,7 +215,6 @@ function updateWeekDates() {
 async function generatePlanning() {
     const week = document.getElementById('week_select').value;
     const statusMsg = document.getElementById('p3_status');
-    const tbody = document.getElementById('p3_table_body');
     const cards = document.querySelectorAll('.day-card');
     const config = { week: week, days: [] };
     
@@ -248,17 +232,31 @@ async function generatePlanning() {
     });
 
     statusMsg.innerText = "⏳ Génération...";
-    tbody.innerHTML = '<tr><td class="empty-msg">Calcul...</td></tr>';
-
     try {
         const formData = new FormData();
         formData.append('config', JSON.stringify(config));
         const res = await fetch('/api/generate', { method: 'POST', body: formData });
         const result = await res.json();
         statusMsg.innerText = result.message;
-        if (result.data) renderDynamicTable(result.data, 'p3_table_body');
+        loadGenerated();
     } catch (e) {
         statusMsg.innerText = "❌ Erreur.";
+    }
+}
+
+async function loadGenerated() {
+    try {
+        const res = await fetch('/api/generated');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p3_table_body');
+        renderDynamicTable(result.data, 'p4_table_body');
+    } catch(e) {}
+}
+
+async function unplanAll() {
+    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications générées ?')) {
+        await fetch('/api/unplan', { method: 'POST' });
+        loadGenerated();
     }
 }
 
@@ -309,7 +307,6 @@ async function loadDashboard() {
         renderDynamicTable(result.top5, 'p7_top5_body');
         renderDynamicTable(result.done_visites, 'p7_done_body');
         
-        // Graphiques
         if (result.charts) {
             const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
             
@@ -319,16 +316,16 @@ async function loadDashboard() {
             
             const c1 = result.charts.chart1;
             if (c1 && c1.length > 0) {
-                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total', marker: { color: '#747474' } };
-                const t2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' } };
+                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside' };
+                const t2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'outside' };
                 Plotly.newPlot(chart1Div, [t1, t2], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
             } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
             const c2 = result.charts.chart2;
             if (c2 && c2.length > 0) {
-                const t1 = { x: c2.map(d=>d.project), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' } };
-                const t2 = { x: c2.map(d=>d.project), y: c2.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' } };
-                const t3 = { x: c2.map(d=>d.project), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' } };
+                const t1 = { x: c2.map(d=>d.project), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside' };
+                const t2 = { x: c2.map(d=>d.project), y: c2.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c2.map(d=>d.faite), textposition: 'outside' };
+                const t3 = { x: c2.map(d=>d.project), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside' };
                 Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, barmode: 'group', legend: {title: {text: 'Légende'}}});
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
