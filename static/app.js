@@ -1,5 +1,6 @@
 let deleteTarget = null;
 let pageCache = {};
+let dashboardData = null; // Variable globale pour stocker les données du dashboard
 
 // ==========================================
 // CACHE MANAGEMENT
@@ -368,6 +369,7 @@ async function loadDashboard() {
         const res = await fetch(url);
         if(!res.ok) throw new Error("Erreur réseau " + res.status);
         const result = await res.json();
+                dashboardData = result; // Sauvegarder les données pour les filtres locaux
         const m = result.metrics || {};
         
         metricsDiv.innerHTML = `
@@ -389,7 +391,7 @@ async function loadDashboard() {
             Plotly.purge(chart3Div);
             
             // Chart 1
-            const c1 = result.charts.chart1 || [];
+            filterChart1();
             
             // --- FILTRE PAR PROJET (MULTI-SÉLECTION) ---
             const projFilter = document.getElementById('p7_proj_filter');
@@ -456,4 +458,49 @@ async function loadDashboard() {
         console.error("Err loadDashboard:", e);
         metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur de chargement</h3></div></div>';
     }
+    // ==========================================
+// FILTRE GRAPHIQUE 1
+// ==========================================
+function filterChart1() {
+    if (!dashboardData) return;
+    
+    const c1 = dashboardData.charts.chart1 || [];
+    const projFilter = document.getElementById('p7_proj_filter');
+    const chart1Div = document.getElementById('chart1_div');
+    const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
+
+    // 1. Remplir le menu déroulant la première fois
+    if (projFilter.options.length <= 1) {
+        const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
+        uniqueProjects.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.innerText = p;
+            projFilter.appendChild(opt);
+        });
+    }
+
+    // 2. Récupérer les projets sélectionnés
+    const selectedProjs = Array.from(projFilter.selectedOptions).map(opt => opt.value);
+    
+    // 3. Filtrer les données
+    let filteredC1;
+    if (selectedProjs.length === 0 || selectedProjs.includes("")) {
+        filteredC1 = c1;
+    } else {
+        filteredC1 = c1.filter(d => selectedProjs.includes(d.project));
+    }
+    
+    // 4. Dessiner le graphique
+    if (filteredC1.length > 0) {
+        const max1 = Math.max(...filteredC1.map(d => d.total));
+        const t1 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
+        const t3 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: filteredC1.map(d=>d.faite), textposition: 'inside', offsetgroup: '0' };
+        
+        const layout1 = { ...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max1 * 1.15] } };
+        Plotly.newPlot(chart1Div, [t1, t3], layout1);
+    } else { 
+        chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>'; 
+    }
+}
 }
