@@ -324,13 +324,21 @@ async function loadDashboard() {
     const chart2Div = document.getElementById('chart2_div');
     const chart3Div = document.getElementById('chart3_div');
     
+    // Récupérer les valeurs du filtre de date
+    const startDate = document.getElementById('p7_start_date').value;
+    const endDate = document.getElementById('p7_end_date').value;
+    
+    let url = '/api/dashboard?';
+    if (startDate) url += `start_date=${startDate}&`;
+    if (endDate) url += `end_date=${endDate}&`;
+    
     metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
     if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (doneBody) doneBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
 
     try {
-        const res = await fetch('/api/dashboard');
+        const res = await fetch(url);
         const result = await res.json();
         const m = result.metrics;
         
@@ -352,23 +360,23 @@ async function loadDashboard() {
             Plotly.purge(chart2Div);
             Plotly.purge(chart3Div);
             
-            // Graphique 1 : Total à passer | Planifié + Effectuée
+            // Graphique 1 : Total à passer | Planifié (base) + Effectuée (empilé)
             const c1 = result.charts.chart1;
             if (c1 && c1.length > 0) {
                 const planifie_arr = c1.map(d => d.planifie);
-                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside' };
+                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
                 const t2 = { x: c1.map(d=>d.project), y: planifie_arr, type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: planifie_arr, textposition: 'outside', offsetgroup: '1' };
                 const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '1', base: planifie_arr };
                 Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
             } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-            // Graphique 2 : Planifié | Effectuée + Absent
+            // Graphique 2 : Planifié | Effectuée (base) + Absent (empilé)
             const c2 = result.charts.chart2;
             if (c2 && c2.length > 0) {
                 const faite_arr = c2.map(d => d.faite);
-                const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside' };
-                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '2' };
-                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '2', base: faite_arr };
+                const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
+                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
+                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '1', base: faite_arr };
                 Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
