@@ -637,21 +637,17 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         else:
             med_df['Projet_Affichage'] = 'N/A'
         
-    # --- CALCULS STRICTS SELON LES RÈGLES EXACTES ---
-    com_lower = med_df['Commentaire'].astype(str).str.lower()
-    statut_lower = med_df['Statut Visite'].astype(str).str.strip().str.lower()
-    
-    is_fait = com_lower.str.contains('ok', na=False)
-    is_abs = com_lower.str.contains('absent|report', na=False)
-    # RÈGLE EXACTE : Planifié = ceux qui ont "Planifié" dans la colonne Statut Visite (SANS tenir compte du commentaire)
-    is_planifie = (statut_lower == 'planifié')
+    # --- NOUVELLE RÈGLE DE CALCUL ---
+    is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
+    is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié')
+    # Absent = Tout ce qui est Planifié mais qui n'est pas OK
+    is_abs = is_planifie & ~is_fait
     
     total_a_passer = len(med_df) 
     total_fait = len(med_df[is_fait])
     total_absent = len(med_df[is_abs])
     total_planifie = len(med_df[is_planifie])
-    # Le reste à planifier correspond à ceux qui ne sont ni fait, ni absent, ni planifié
-    reste_a_planifier = len(med_df[~is_fait & ~is_abs & ~is_planifie])
+    reste_a_planifier = len(med_df[~is_fait & ~is_planifie])
     
     metrics = {
         "total_a_passer": total_a_passer, 
@@ -669,7 +665,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             Total=('WORKDAY ID', 'count'),
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            Absent=('Commentaire', lambda x: x.str.lower().str.contains('absent|report', na=False).sum())
+            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~med_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
         ).reset_index().sort_values('Total', ascending=False)
         
         for _, row in counts_df.iterrows():
@@ -689,10 +685,10 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         chart2_df = date_df.groupby('DateDT').agg(
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            Absent=('Commentaire', lambda x: x.str.lower().str.contains('absent|report', na=False).sum())
-        ).reset_index().sort_values('DateDT') # Tri chronologique ascendant ici
+            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~date_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
+        ).reset_index().sort_values('DateDT') # Tri chronologique
         
-        # 3. Formater en texte APRES le tri pour conserver l'ordre
+        # 3. Formater en texte APRES le tri
         for _, row in chart2_df.iterrows():
             chart2_data.append({
                 "date": row['DateDT'].strftime('%d/%m/%Y'), 
