@@ -603,8 +603,11 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         if col not in med_df.columns:
             med_df[col] = ''
             
-    # Convertir Date Visite en datetime pour le filtre
-    med_df['Date Visite'] = pd.to_datetime(med_df['Date Visite'], errors='coerce')
+    # Optimisation : Convertir en datetime SEULEMENT si ce n'est pas déjà fait
+    if 'Date Visite' in med_df.columns and not pd.api.types.is_datetime64_any_dtype(med_df['Date Visite']):
+        med_df['Date Visite'] = pd.to_datetime(med_df['Date Visite'], errors='coerce')
+    elif 'Date Visite' not in med_df.columns:
+        med_df['Date Visite'] = pd.NaT
     
     # Appliquer le filtre de date
     if start_date:
@@ -615,20 +618,24 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if med_df.empty:
         return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
         
-    # Calcul de la durée
-    if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
-        med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
-        med_df['Heure Retour'] = pd.to_datetime(med_df['Heure Retour'].astype(str), errors='coerce')
-        med_df['Durée (min)'] = (med_df['Heure Retour'] - med_df['Heure Départ']).dt.total_seconds() / 60
-        med_df.loc[med_df['Durée (min)'] < 0, 'Durée (min)'] = np.nan 
-    else:
-        med_df['Durée (min)'] = np.nan
+    # Calcul de la durée (Optimisé : skip si déjà calculé)
+    if 'Durée (min)' not in med_df.columns or med_df['Durée (min)'].isnull().all():
+        if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
+            if not pd.api.types.is_datetime64_any_dtype(med_df['Heure Départ']):
+                med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
+            if not pd.api.types.is_datetime64_any_dtype(med_df['Heure Retour']):
+                med_df['Heure Retour'] = pd.to_datetime(med_df['Heure Retour'].astype(str), errors='coerce')
+            med_df['Durée (min)'] = (med_df['Heure Retour'] - med_df['Heure Départ']).dt.total_seconds() / 60
+            med_df.loc[med_df['Durée (min)'] < 0, 'Durée (min)'] = np.nan 
+        else:
+            med_df['Durée (min)'] = np.nan
         
-    # Mapping des projets
-    if 'Projet' in med_df.columns:
-        med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
-    else:
-        med_df['Projet_Affichage'] = 'N/A'
+    # Mapping des projets (Optimisé : skip si déjà fait)
+    if 'Projet_Affichage' not in med_df.columns:
+        if 'Projet' in med_df.columns:
+            med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
+        else:
+            med_df['Projet_Affichage'] = 'N/A'
         
     # --- CALCULS STRICTS SELON LES RÈGLES EXACTES ---
     com_lower = med_df['Commentaire'].astype(str).str.lower()
@@ -729,26 +736,3 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "done_visites": done_visites, 
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
-
-@app.get("/api/export/{category}")
-async def export_data(category: str):
-    df = None
-    if category == 'planning':
-        if app_state['plannings']: df = list(app_state['plannings'].values())[0]
-    elif category == 'collab': df = app_state.get('medical_list')
-    elif category == 'suivi': df = app_state.get('rta_data')
-    elif category == 'absences': df = app_state.get('absences')
-    elif category == 'done_visites':
-        rta_data = app_state.get('rta_data')
-        if rta_data is not None: df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
-    elif category == 'generated':
-        med_list = app_state.get('medical_list')
-        if med_list is not None: df = med_list[med_list['Date Visite'].notna()].copy()
-
-    if df is None or df.empty: return {"error": "Aucune donnée à exporter"}
-
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data')
-    output.seek(0)
-    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={category}.xlsx"})
