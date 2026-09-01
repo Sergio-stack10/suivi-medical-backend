@@ -28,7 +28,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None, 'absences': pd.DataFrame()}
+app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None, 'non_effectuees': pd.DataFrame()}
 
 def get_mongo_client():
     mongo_uri = os.environ.get("MONGO_URI")
@@ -54,7 +54,6 @@ def load_history():
         doc = collection.find_one({"_id": 1})
         if doc:
             loaded_state = pickle.loads(doc['data'])
-            # Migration des anciennes absences vers non_effectuees si nécessaire, sinon init
             if 'non_effectuees' not in loaded_state or not isinstance(loaded_state['non_effectuees'], pd.DataFrame):
                 loaded_state['non_effectuees'] = pd.DataFrame()
             app_state = loaded_state
@@ -329,7 +328,6 @@ def parse_rta_file(filename: str, content: bytes):
     if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
     if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
     if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
-    # S'assurer que les colonnes critiques sont en texte pour la comparaison
     df['Statut Visite'] = df['Statut Visite'].astype(str)
     df['Commentaire'] = df['Commentaire'].astype(str)
     return df
@@ -369,7 +367,6 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             
             is_planifie = (statut_lower == 'planifié')
             is_ok = com_lower.str.contains('ok', na=False)
-            # Règle : Planifié ET Commentaire != OK
             is_non_eff = is_planifie & ~is_ok
             
             new_non_eff = df[is_non_eff].copy()
@@ -387,7 +384,6 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
                 if 'Date Visite' in new_non_eff.columns:
                     new_non_eff['Date Visite'] = pd.to_datetime(new_non_eff['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
                 
-                # Fusion avec les données existantes et déduplication sur toutes les colonnes
                 existing = app_state.get('non_effectuees', pd.DataFrame())
                 if existing.empty:
                     app_state['non_effectuees'] = new_non_eff
@@ -395,7 +391,6 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
                     combined = pd.concat([existing, new_non_eff], ignore_index=True)
                     app_state['non_effectuees'] = combined.drop_duplicates().reset_index(drop=True)
 
-            # Mise à jour du statut Visite dans la liste médicale
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
                 for _, rta_row in df.iterrows():
@@ -450,7 +445,7 @@ async def delete_data(category: str):
     if category == 'planning': app_state['plannings'] = {}
     elif category == 'collab': app_state['medical_list'] = None
     elif category == 'suivi': app_state['rta_data'] = None
-    elif category == 'absences': app_state['absences'] = pd.DataFrame()
+    elif category == 'non_effectuees': app_state['non_effectuees'] = pd.DataFrame()
     save_history()
     return {"message": "Données supprimées avec succès."}
 
@@ -613,37 +608,25 @@ async def get_non_effectuees():
     if non_eff_df is None or non_eff_df.empty: return {"data": []}
     return {"data": clean_for_json(non_eff_df)}
 
-@app.delete("/api/delete/{category}")
-async def delete_data(category: str):
-    if category == 'planning': app_state['plannings'] = {}
-    elif category == 'collab': app_state['medical_list'] = None
-    elif category == 'suivi': app_state['rta_data'] = None
-    elif category == 'non_effectuees': app_state['non_effectuees'] = pd.DataFrame()
-    save_history()
-    return {"message": "Données supprimées avec succès."}
-
 @app.get("/api/dashboard")
 async def get_dashboard(start_date: str = None, end_date: str = None):
-    # Base EXCLUSIVE sur le fichier RTA (Page 5)
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
         return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
         
-    # 1. Calcul du Total à passer AVANT tout filtre de date
-    total_a_passer = len(rta_data)
-    
-    # 2. Préparation du DataFrame
-    med_df = rta_data.copy()
+    med_df_full = rta_data.copy()
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
-        if col not in med_df.columns:
-            med_df[col] = ''
+        if col not in med_df_full.columns:
+            med_df_full[col] = ''
             
-    if 'Date Visite' in med_df.columns and not pd.api.types.is_datetime64_any_dtype(med_df['Date Visite']):
-        med_df['Date Visite'] = pd.to_datetime(med_df['Date Visite'], errors='coerce')
-    elif 'Date Visite' not in med_df.columns:
-        med_df['Date Visite'] = pd.NaT
+    total_a_passer = len(med_df_full)
     
-    # 3. Application du filtre de date pour les autres métriques
+    if 'Date Visite' in med_df_full.columns and not pd.api.types.is_datetime64_any_dtype(med_df_full['Date Visite']):
+        med_df_full['Date Visite'] = pd.to_datetime(med_df_full['Date Visite'], errors='coerce')
+    elif 'Date Visite' not in med_df_full.columns:
+        med_df_full['Date Visite'] = pd.NaT
+    
+    med_df = med_df_full.copy()
     if start_date:
         med_df = med_df[med_df['Date Visite'] >= pd.to_datetime(start_date)]
     if end_date:
@@ -651,12 +634,17 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         
     if med_df.empty and total_a_passer > 0:
         return {
-            "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0.0%"}, 
+            "metrics": {
+                "total_a_passer": total_a_passer, 
+                "total_planifie": 0, 
+                "total_fait": 0, 
+                "reste_a_planifier": total_a_passer,
+                "pct_fait": "0.0%"
+            }, 
             "avg_duration": [], "top5": [], "done_visites": [], 
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
         
-    # Calcul de la durée
     if 'Durée (min)' not in med_df.columns or med_df['Durée (min)'].isnull().all():
         if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
             if not pd.api.types.is_datetime64_any_dtype(med_df['Heure Départ']):
@@ -669,10 +657,11 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             med_df['Durée (min)'] = np.nan
         
     if 'Projet_Affichage' not in med_df.columns:
-        if 'Projet' in med_df.columns: med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
-        else: med_df['Projet_Affichage'] = 'N/A'
+        if 'Projet' in med_df.columns:
+            med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
+        else:
+            med_df['Projet_Affichage'] = 'N/A'
         
-    # --- CALCULS ---
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
     is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié')
     is_non_eff = is_planifie & ~is_fait
@@ -750,6 +739,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, 
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
+
 @app.get("/api/export/{category}")
 async def export_data(category: str):
     df = None
