@@ -382,9 +382,7 @@ async function loadDashboard() {
             const c1 = result.charts.chart1 || [];
             if (c1.length > 0) {
                 const faite_arr = c1.map(d => d.faite);
-                // Barre 1 : Total (gris)
                 const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-                // Barre 2 : Effectuée (turquoise, base) + Planifié (bleu marine, empilé au-dessus)
                 const t2 = { x: c1.map(d=>d.project), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
                 const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'outside', offsetgroup: '1', base: faite_arr };
                 Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
@@ -394,19 +392,16 @@ async function loadDashboard() {
             const c2 = result.charts.chart2 || [];
             if (c2.length > 0) {
                 const faite_arr = c2.map(d => d.faite);
-                const date_order = c2.map(d=>d.date); // Ordre chronologique fourni par le backend
+                const date_order = c2.map(d=>d.date); 
                 
-                // Barre 1 : Planifié (100%)
                 const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
-                // Barre 2 : Effectuée (base) + Absent (haut)
                 const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
-                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '1', base: faite_arr };
+                // Libellé mis à jour ici :
+                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Non effectuée', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '1', base: faite_arr };
                 
-                // Forcer l'ordre chronologique des dates sur l'axe X
                 const layout2 = {...layout, xaxis: { categoryorder: 'array', categoryarray: date_order }};
                 Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout2, legend: {title: {text: 'Légende'}}});
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-
             // Chart 3
             const c3 = result.charts.chart3 || {effectuee:0, reste:0, non_planifie:0};
             if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
