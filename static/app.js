@@ -253,4 +253,160 @@ function updateWeekDates() {
         card.className = 'day-card';
         card.innerHTML = `
             <div class="day-title">${days[i]} <input type="checkbox" checked onchange="this.closest('.day-card').classList.toggle('disabled', !this.checked)"></div>
-            <div class="day-input-group"><label>Date</label><input
+            <div class="day-input-group"><label>Date</label><input type="date" class="form-control" value="${dateStr}" disabled></div>
+            <div class="day-input-group"><label>Début</label><input type="time" class="form-control" value="09:00"></div>
+            <div class="day-input-group"><label>Fin</label><input type="time" class="form-control" value="16:00"></div>
+            <div class="day-input-group"><label>Nb River</label><input type="number" class="form-control" value="5" min="0"></div>
+            <div class="day-input-group"><label>Nb Autres</label><input type="number" class="form-control" value="20" min="0"></div>
+            <div class="day-input-group"><label>Priorité</label><select class="form-control"><option>Aucune priorité</option><option>Visite systématique</option><option>Visite d'embauche</option></select></div>
+            <div class="day-input-group"><label>Statut</label><select class="form-control"><option>Tous</option><option>CC</option><option>ENC</option></select></div>
+        `;
+        daysGrid.appendChild(card);
+    }
+}
+
+async function generatePlanning() {
+    const week = document.getElementById('week_select').value;
+    const statusMsg = document.getElementById('p3_status');
+    const cards = document.querySelectorAll('.day-card');
+    const config = { week: week, days: [] };
+    
+    cards.forEach(card => {
+        config.days.push({
+            actif: card.querySelector('input[type="checkbox"]').checked,
+            date: card.querySelector('input[type="date"]').value,
+            debut: card.querySelectorAll('input[type="time"]')[0].value,
+            fin: card.querySelectorAll('input[type="time"]')[1].value,
+            qty_river: card.querySelector('input[type="number"]').value,
+            qty_others: card.querySelectorAll('input[type="number"]')[1].value,
+            prio: card.querySelectorAll('select')[0].value,
+            statut_filter: card.querySelectorAll('select')[1].value
+        });
+    });
+
+    statusMsg.innerText = "⏳ Génération...";
+    try {
+        const formData = new FormData();
+        formData.append('config', JSON.stringify(config));
+        const res = await fetch('/api/generate', { method: 'POST', body: formData });
+        const result = await res.json();
+        statusMsg.innerText = result.message;
+        clearCache(['p4']);
+        loadGenerated();
+    } catch (e) {
+        statusMsg.innerText = "❌ Erreur.";
+    }
+}
+
+async function loadGenerated() {
+    try {
+        const res = await fetch('/api/generated');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p3_table_body');
+        renderDynamicTable(result.data, 'p4_table_body');
+    } catch(e) { console.error('Err loadGenerated:', e); }
+}
+
+async function unplanAll() {
+    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications (dates de visites assignées) ?')) {
+        await fetch('/api/unplan', { method: 'POST' });
+        clearCache(['p3', 'p4', 'p7']);
+        loadGenerated();
+        alert("Planifications effacées.");
+    }
+}
+
+// ==========================================
+// PAGE 6 & 7
+// ==========================================
+async function loadAbsences() {
+    const tbody = document.getElementById('p6_table_body');
+    let thead = document.querySelector('#p6_table thead');
+    if (thead) thead.innerHTML = '';
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    try {
+        const res = await fetch('/api/absences');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p6_table_body');
+    } catch(e) {
+        tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>';
+    }
+}
+
+async function loadDashboard() {
+    const metricsDiv = document.getElementById('p7_metrics');
+    const avgBody = document.getElementById('p7_avg_body');
+    const top5Body = document.getElementById('p7_top5_body');
+    const doneBody = document.getElementById('p7_done_body');
+    const chart1Div = document.getElementById('chart1_div');
+    const chart2Div = document.getElementById('chart2_div');
+    const chart3Div = document.getElementById('chart3_div');
+    
+    const startDate = document.getElementById('p7_start_date') ? document.getElementById('p7_start_date').value : '';
+    const endDate = document.getElementById('p7_end_date') ? document.getElementById('p7_end_date').value : '';
+    
+    let url = '/api/dashboard?';
+    if (startDate) url += `start_date=${startDate}&`;
+    if (endDate) url += `end_date=${endDate}&`;
+    
+    metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
+    if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    if (doneBody) doneBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+
+    try {
+        const res = await fetch(url);
+        if(!res.ok) throw new Error("Erreur réseau " + res.status);
+        const result = await res.json();
+        const m = result.metrics || {};
+        
+        metricsDiv.innerHTML = `
+            <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
+            <div class="metric-card"><div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div><div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div></div>
+            <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
+            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste_a_planifier || 0}</h3><p>Reste à planifier</p></div></div>
+        `;
+        
+        renderDynamicTable(result.avg_duration || [], 'p7_avg_body');
+        renderDynamicTable(result.top5 || [], 'p7_top5_body');
+        renderDynamicTable(result.done_visites || [], 'p7_done_body');
+        
+        if (result.charts) {
+            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, barmode: 'group' };
+            
+            Plotly.purge(chart1Div);
+            Plotly.purge(chart2Div);
+            Plotly.purge(chart3Div);
+            
+            // Chart 1
+            const c1 = result.charts.chart1 || [];
+            if (c1.length > 0) {
+                const planifie_arr = c1.map(d => d.planifie);
+                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
+                const t2 = { x: c1.map(d=>d.project), y: planifie_arr, type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: planifie_arr, textposition: 'outside', offsetgroup: '1' };
+                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '1', base: planifie_arr };
+                Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
+            } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+
+            // Chart 2
+            const c2 = result.charts.chart2 || [];
+            if (c2.length > 0) {
+                const faite_arr = c2.map(d => d.faite);
+                const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
+                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
+                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '1', base: faite_arr };
+                Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
+            } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+
+            // Chart 3
+            const c3 = result.charts.chart3 || {effectuee:0, reste:0, non_planifie:0};
+            if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
+                const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
+                Plotly.newPlot(chart3Div, data3, {...layout, barmode: null, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}});
+            } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+        }
+    } catch(e) {
+        console.error("Err loadDashboard:", e);
+        metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur de chargement</h3></div></div>';
+    }
+}
