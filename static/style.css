@@ -108,16 +108,87 @@ tr:hover { background: #f9f9f9; }
     background-color: #001a26; color: #A8F3EB; text-align: center;
     font-size: 12px; padding: 8px; z-index: 999999; border-top: 2px solid #25E2CC;
 }
-/* --- Liste déroulante à cases à cocher --- */
+/* --- Liste déroulante à cases à cocher (dropdown popover) --- */
 .multiselect-container {
     position: relative;
     width: 100%;
     max-width: 400px;
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     font-family: 'Poppins', sans-serif;
 }
+
 .multiselect-box {
     width: 100%;
-    padding: 8px 12px;
+    padding: 10px 15px;
     border: 1px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    font-size: 13px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: 0.2s;
+    user-select: none;
+}
+
+.multiselect-box:hover {
+    border-color: #25E2CC;
+    box-shadow: 0 2px 8px rgba(37, 226, 204, 0.2);
+}
+
+/* Chevron pivotant */
+.multiselect-box i { transition: transform 0.2s; margin: 0 !important; float: none !important; }
+.multiselect-box.open i { transform: rotate(180deg); }
+
+/* Liste : masquée par défaut, en overlay absolue */
+.multiselect-options {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 100%;
+    max-height: 250px;
+    overflow-y: auto;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    z-index: 500;
+    padding: 8px;
+}
+
+.multiselect-options.show { display: block; animation: dropdownIn 0.18s ease-out; }
+
+@keyframes dropdownIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Lignes de la liste */
+.multiselect-options > div {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.multiselect-options > div:hover { background: #f4f7f6; }
+
+.multiselect-options input[type="checkbox"] {
+    width: 16px; height: 16px;
+    cursor: pointer;
+    accent-color: #25E2CC;
+    flex-shrink: 0;
+}
+.multiselect-options label {
+    margin-left: 8px;
+    font-size: 13px;
+    color: #555;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
