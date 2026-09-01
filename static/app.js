@@ -69,7 +69,7 @@ function switchPage(pageId, element) {
     if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
     if (pageId === 'p3') { loadWeeks(); loadGenerated(); pageCache.p4 = true; }
     if (pageId === 'p4' && !pageCache.p4) { loadGenerated(); pageCache.p4 = true; }
-    if (pageId === 'p6' && !pageCache.p6) { loadAbsences(); pageCache.p6 = true; }
+    if (pageId === 'p6' && !pageCache.p6) { loadNonEffectuees(); pageCache.p6 = true; }
     if (pageId === 'p7') { loadDashboard(); }
 }
 
@@ -96,7 +96,7 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
         if (deleteTarget === 'planning') { renderDynamicTable([], 'p1_table_body'); clearCache(['p1', 'p3', 'p4']); }
         if (deleteTarget === 'collab') { renderDynamicTable([], 'p2_table_body'); clearCache(['p2', 'p3', 'p4']); }
         if (deleteTarget === 'suivi') { renderDynamicTable([], 'p5_table_body'); clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
-        if (deleteTarget === 'absences') { renderDynamicTable([], 'p6_table_body'); clearCache(['p6']); }
+        if (deleteTarget === 'non_effectuees') { renderDynamicTable([], 'p6_table_body'); clearCache(['p6']); }
         
         closeModal();
     } catch (e) {
@@ -319,13 +319,13 @@ async function unplanAll() {
 // ==========================================
 // PAGE 6 & 7
 // ==========================================
-async function loadAbsences() {
+async function loadNonEffectuees() {
     const tbody = document.getElementById('p6_table_body');
     let thead = document.querySelector('#p6_table thead');
     if (thead) thead.innerHTML = '';
     tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     try {
-        const res = await fetch('/api/absences');
+        const res = await fetch('/api/non_effectuees');
         const result = await res.json();
         renderDynamicTable(result.data, 'p6_table_body');
     } catch(e) {
