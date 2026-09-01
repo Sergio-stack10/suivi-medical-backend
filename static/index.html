@@ -76,7 +76,12 @@
                     <button class="btn-primary small" onclick="uploadFiles('collabFiles', 'collab', 'p2_table_body', 'p2_status')"><i class="fas fa-upload"></i> Importer</button>
                     <div id="p2_status" class="status-box small"></div>
                 </div>
-
+                <div class="import-block">
+                    <h4><i class="fas fa-clock-rotate-left"></i> Ancien outil (planifiés)</h4>
+                    <input type="file" id="legacyFiles" accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('legacyFiles', 'legacy', 'p4_table_body', 'p4_status')"><i class="fas fa-upload"></i> Importer</button>
+                    <div id="p4_status" class="status-box small"></div>
+                </div>
                 <div class="import-block">
                     <h4><i class="fas fa-notes-medical"></i> Fichier Suivi (RTA)</h4>
                     <input type="file" id="suiviFiles" accept=".xlsx, .xls, .xlsb" class="file-input">
