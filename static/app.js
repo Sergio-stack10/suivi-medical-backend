@@ -187,22 +187,22 @@ function renderDynamicTable(data, tbodyId) {
 // ==========================================
 // PAGE 1 : PLANNING
 // ==========================================
-async function loadWeeksDropdown() {
+async function loadWeeks() {
     try {
         const res = await fetch('/api/weeks');
         const data = await res.json();
-        const select = document.getElementById('p1_week_select');
+        const select = document.getElementById('week_select');
         select.innerHTML = '';
         if (data.weeks.length === 0) { select.innerHTML = '<option>Aucune semaine</option>'; return; }
         data.weeks.forEach(week => {
             const option = document.createElement('option');
             option.value = week.name; option.innerText = week.name;
+            option.dataset.dates = JSON.stringify(week.dates || []);  // ★ AJOUT
             select.appendChild(option);
         });
-        loadSelectedPlanning();
-    } catch (e) { console.error('Err loadWeeksDropdown:', e); }
+        updateWeekDates();
+    } catch (e) { console.error('Err loadWeeks:', e); }
 }
-
 async function loadSelectedPlanning() {
     const weekName = document.getElementById('p1_week_select').value;
     if (!weekName || weekName === 'Aucune semaine') return;
@@ -247,7 +247,7 @@ function updateWeekDates() {
         card.className = 'day-card';
         card.innerHTML = `
             <div class="day-title">${days[i]} <input type="checkbox" checked onchange="this.closest('.day-card').classList.toggle('disabled', !this.checked)"></div>
-            <div class="day-input-group"><label>Date</label><input type="date" class="form-control" value="${dateStr}" disabled></div>
+            <div class="day-input-group"><label>Date</label><input type="date" class="form-control" value="${dateStr}"></div>
             <div class="day-input-group"><label>Début</label><input type="time" class="form-control" value="09:00"></div>
             <div class="day-input-group"><label>Fin</label><input type="time" class="form-control" value="16:00"></div>
             <div class="day-input-group"><label>Nb River</label><input type="number" class="form-control" value="5" min="0"></div>
