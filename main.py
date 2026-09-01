@@ -15,6 +15,8 @@ import os
 import pickle
 import pymongo
 import bson
+import asyncio
+import importlib.util
 
 app = FastAPI()
 
@@ -83,10 +85,7 @@ async def read_root():
 # ★★★ MODIFIÉ : moteur calamine (5-10x plus rapide) si disponible, sinon fallback
 def get_excel_engine(filename: str):
     try:
-        import python_calamine  # noqa
-        import pandas as _pd
-        from packaging import version as _v
-        if _v.parse(_pd.__version__) >= _v.parse('2.2'):
+        if importlib.util.find_spec("python_calamine") is not None:
             return 'calamine'
     except Exception:
         pass
