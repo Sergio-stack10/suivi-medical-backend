@@ -222,7 +222,12 @@
                         <div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>
                     </div>
                     <div class="card" style="margin-bottom: 20px;">
-                        <div class="card-header">1. Visuel par projet</div>
+                        <div class="card-header">1. Total à passer vs (Planifié + Effectuée) par projet</div>
+                        <div style="padding: 15px 15px 0 15px;">
+                            <select id="p7_proj_filter" onchange="loadDashboard()" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-weight: 600; color: #555; width: 100%; max-width: 300px;">
+                                <option value="">Tous les projets</option>
+                            </select>
+                        </div>
                         <div id="chart1_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
                     <div class="card" style="margin-bottom: 20px;">
