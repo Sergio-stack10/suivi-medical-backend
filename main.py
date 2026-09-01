@@ -167,7 +167,6 @@ def clean_for_json(df):
     df = df.copy()
     for col in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
-            # Vérifier si la colonne contient des heures (time != 00:00:00) ou juste des dates
             valid_times = df[col].dropna().dt.time
             if not valid_times.empty and (valid_times != datetime.time(0, 0, 0)).any():
                 df[col] = df[col].dt.strftime('%H:%M').fillna('')
@@ -250,7 +249,6 @@ def parse_planning(files_data: list):
                 df = df.iloc[:, cols]; df.columns = new_cols
             else: continue
         else: continue
-        # Convertir WORKDAY ID en Int64
         df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
         df['Paid ID'] = df['Paid ID'].astype(str).str.replace(" ", "").str.upper()
         df = df[df['WORKDAY ID'].notna()]
@@ -300,13 +298,11 @@ def parse_liste_visite(filename: str, content: bytes):
         raw_statut = df[statut_col].astype(str).str.upper()
         df['Statut'] = raw_statut.apply(lambda x: 'CC' if 'ADVISOR' in x or 'CUSTOMER SERVICE' in x or 'CC' in x else 'ENC')
     else: df['Statut'] = 'ENC'
-    # Convertir WORKDAY ID en Int64
     df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
     df = df.rename(columns={id_col: 'WORKDAY ID'})
     if nom_col: df = df.rename(columns={nom_col: 'Nom'})
     if 'Nom' not in df.columns: df['Nom'] = ''
     df = df[df['WORKDAY ID'].notna()]
-    
     df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce')
     df['Ancienneté'] = df['Date d\'embauche'].apply(calculate_anciennete)
     df['Ancienneté_num'] = df['Date d\'embauche'].apply(calculate_anciennete_num)
@@ -329,14 +325,11 @@ def parse_rta_file(filename: str, content: bytes):
     df = df.loc[:, ~df.columns.duplicated()]
     df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
     
-    # Convertir WORKDAY ID en Int64
     df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
     
-    # Convertir Dates en vraies dates
     if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
     if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
     
-    # Convertir Heures en vrais formats horaires (datetime pour garder la compatibilité calcul)
     if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
     if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
     
@@ -603,54 +596,46 @@ async def get_absences():
 
 @app.get("/api/dashboard")
 async def get_dashboard():
-    med_list = app_state.get('medical_list')
-    if med_list is None: return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
-        
-    med_df = med_list.copy()
+    # Base EXCLUSIVE sur le fichier RTA (Page 5)
     rta_data = app_state.get('rta_data')
+    if rta_data is None or rta_data.empty:
+        return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
+        
+    med_df = rta_data.copy()
     
-    if rta_data is not None and not rta_data.empty:
-        rta_subset = rta_data[['WORKDAY ID', 'Commentaire', 'Heure Départ', 'Heure Retour']].copy()
-        rta_subset = rta_subset.rename(columns={'Commentaire': 'RTA_Commentaire', 'Heure Départ': 'RTA_Heure_Depart', 'Heure Retour': 'RTA_Heure_Retour'})
-        med_df = pd.merge(med_df, rta_subset, on='WORKDAY ID', how='left')
-        
-        med_df['Commentaire'] = med_df['Commentaire'].fillna('')
-        med_df['RTA_Commentaire'] = med_df['RTA_Commentaire'].fillna('')
-        med_df.loc[med_df['RTA_Commentaire'] != '', 'Commentaire'] = med_df['RTA_Commentaire']
-        
-        if 'RTA_Heure_Depart' in med_df.columns:
-            med_df['Heure Départ'] = pd.to_datetime(med_df['RTA_Heure_Depart'].astype(str), errors='coerce')
-            med_df['Heure Retour'] = pd.to_datetime(med_df['RTA_Heure_Retour'].astype(str), errors='coerce')
-            med_df['Durée (min)'] = (med_df['Heure Retour'] - med_df['Heure Départ']).dt.total_seconds() / 60
-            med_df.loc[med_df['Durée (min)'] < 0, 'Durée (min)'] = np.nan 
-        else:
-            med_df['Durée (min)'] = np.nan
+    # S'assurer que les colonnes existent pour éviter les KeyError
+    for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
+        if col not in med_df.columns:
+            med_df[col] = ''
+            
+    # Calcul de la durée (si les colonnes existent et sont valides)
+    if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
+        med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
+        med_df['Heure Retour'] = pd.to_datetime(med_df['Heure Retour'].astype(str), errors='coerce')
+        med_df['Durée (min)'] = (med_df['Heure Retour'] - med_df['Heure Départ']).dt.total_seconds() / 60
+        med_df.loc[med_df['Durée (min)'] < 0, 'Durée (min)'] = np.nan 
     else:
         med_df['Durée (min)'] = np.nan
-        med_df['Heure Départ'] = pd.NaT
-        med_df['Heure Retour'] = pd.NaT
-            
-    if 'Projet' in med_df.columns: med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
-    else: med_df['Projet_Affichage'] = 'N/A'
         
-    for col in ['Statut Visite', 'Commentaire', 'Nom', 'Prénom', 'Date Visite']:
-        if col not in med_df.columns: med_df[col] = ''
+    # Mapping des projets
+    if 'Projet' in med_df.columns:
+        med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
+    else:
+        med_df['Projet_Affichage'] = 'N/A'
         
-    # Calculs stricts basés sur Statut Visite et Commentaire
-    is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
-    is_abs = med_df['Commentaire'].astype(str).str.lower().str.contains('absent|report', na=False)
-    is_planifie = (med_df['Statut Visite'].astype(str).str.lower() == 'planifié') & ~is_fait & ~is_abs
+    # --- CALCULS STRICTS BASÉS UNIQUEMENT SUR LE FICHIER RTA ---
+    com_lower = med_df['Commentaire'].astype(str).str.lower()
+    statut_lower = med_df['Statut Visite'].astype(str).str.strip().str.lower()
     
-    med_df['Status_Calc'] = 'Non Planifié'
-    med_df.loc[is_fait, 'Status_Calc'] = 'Visite effectuée'
-    med_df.loc[is_abs, 'Status_Calc'] = 'Absent'
-    med_df.loc[is_planifie, 'Status_Calc'] = 'Planifié'
+    is_fait = com_lower.str.contains('ok', na=False)
+    is_abs = com_lower.str.contains('absent|report', na=False)
+    is_planifie = (statut_lower == 'planifié') & ~is_fait & ~is_abs
+    is_non_planifie = (statut_lower == 'non planifié')
     
     total_a_passer = len(med_df)
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
-    total_absent = len(med_df[is_abs])
-    reste_a_planifier = max(0, total_a_passer - total_fait - total_planifie - total_absent)
+    reste_a_planifier = len(med_df[is_non_planifie])
     
     metrics = {
         "total_a_passer": total_a_passer, 
@@ -660,13 +645,20 @@ async def get_dashboard():
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
     
+    # Status for charts
+    med_df['Status_Calc'] = 'Autre'
+    med_df.loc[is_fait, 'Status_Calc'] = 'Visite effectuée'
+    med_df.loc[is_abs, 'Status_Calc'] = 'Absent'
+    med_df.loc[is_planifie, 'Status_Calc'] = 'Planifié'
+    
     chart1_data = []
     chart2_data = []
     if not med_df.empty:
+        # Chart 1 by Project
         counts_df = med_df.groupby(['Projet_Affichage', 'Status_Calc']).size().unstack(fill_value=0).reset_index()
-        for col in ['Planifié', 'Visite effectuée', 'Absent', 'Non Planifié']:
+        for col in ['Planifié', 'Visite effectuée', 'Absent', 'Autre']:
             if col not in counts_df: counts_df[col] = 0
-        counts_df['Total'] = counts_df['Planifié'] + counts_df['Visite effectuée'] + counts_df['Absent'] + counts_df['Non Planifié']
+        counts_df['Total'] = counts_df['Planifié'] + counts_df['Visite effectuée'] + counts_df['Absent'] + counts_df['Autre']
         counts_df = counts_df.sort_values('Total', ascending=False)
         for _, row in counts_df.iterrows():
             chart1_data.append({
@@ -676,6 +668,7 @@ async def get_dashboard():
                 "faite": int(row['Visite effectuée'])
             })
             
+        # Chart 2 by Date (convertir en date vraie pour trier chronologiquement)
         date_df = med_df[pd.to_datetime(med_df['Date Visite'], errors='coerce').notna()].copy()
         date_df['Date Sort'] = pd.to_datetime(date_df['Date Visite'])
         date_df = date_df.sort_values('Date Sort')
@@ -693,6 +686,8 @@ async def get_dashboard():
             })
 
     chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
+    
+    # Avg duration
     med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
@@ -700,6 +695,8 @@ async def get_dashboard():
         avg_df['Durée Moyenne'] = avg_df['Durée (min)'].apply(format_duration)
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
+        
+    # Top 5
     top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top5 = []
     if not top5_df.empty:
@@ -708,15 +705,23 @@ async def get_dashboard():
         top5_df['Durée'] = top5_df['Durée (min)'].apply(format_duration)
         top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
         top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
+        
+    # Done visites
     done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     done_visites = []
     if not done_df.empty:
         done_df['Nom complet'] = done_df['Nom'].fillna('').astype(str) + ' ' + done_df['Prénom'].fillna('').astype(str)
         if 'Payroll ID' not in done_df.columns: done_df['Payroll ID'] = ''
-        if 'Projet' not in done_df.columns: done_df['Projet'] = done_df['Projet_Affichage'] if 'Projet_Affichage' in done_df.columns else 'N/A'
         done_df['Statut visite'] = 'Done'
-        done_visites = clean_for_json(done_df[['WORKDAY ID', 'Payroll ID', 'Nom complet', 'Projet', 'Statut visite']])
-    return {"metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}}
+        done_visites = clean_for_json(done_df[['WORKDAY ID', 'Nom complet', 'Projet_Affichage', 'Statut visite']])
+        
+    return {
+        "metrics": metrics, 
+        "avg_duration": avg_duration, 
+        "top5": top5, 
+        "done_visites": done_visites, 
+        "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
+    }
 
 @app.get("/api/export/{category}")
 async def export_data(category: str):
