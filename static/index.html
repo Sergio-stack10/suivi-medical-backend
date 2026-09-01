@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>➕</text></svg>">
     <meta charset="UTF-8">
     <title>Suivi Visites Médicales</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,12 +42,13 @@
     <div id="appContainer">
         <div class="top-nav">
             <button class="menu-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-                <button class="top-tab" onclick="switchPage('p6', this)"><i class="fas fa-user-slash"></i> Non-effectuées</button>                <button class="top-tab active" onclick="switchPage('p1', this)"><i class="fas fa-file-excel"></i> Planning</button>
+            <div class="nav-tabs">
+                <button class="top-tab active" onclick="switchPage('p1', this)"><i class="fas fa-file-excel"></i> Planning</button>
                 <button class="top-tab" onclick="switchPage('p2', this)"><i class="fas fa-users"></i> Collaborateurs</button>
                 <button class="top-tab" onclick="switchPage('p3', this)"><i class="fas fa-calendar-plus"></i> Génération</button>
                 <button class="top-tab" onclick="switchPage('p4', this)"><i class="fas fa-list-check"></i> Planning généré</button>
                 <button class="top-tab" onclick="switchPage('p5', this)"><i class="fas fa-notes-medical"></i> Suivi</button>
-                <button class="top-tab" onclick="switchPage('p6', this)"><i class="fas fa-user-slash"></i> Absences</button>
+                <button class="top-tab" onclick="switchPage('p6', this)"><i class="fas fa-user-slash"></i> Non-effectuées</button>
                 <button class="top-tab" onclick="switchPage('p7', this)"><i class="fas fa-chart-pie"></i> Dashboard</button>
             </div>
             <div class="user-zone">
@@ -159,7 +159,6 @@
                     <div class="action-bar">
                         <button class="btn-icon" onclick="loadGenerated()"><i class="fas fa-sync"></i> Actualiser</button>
                         <button class="btn-icon export" onclick="exportData('generated')"><i class="fas fa-file-excel"></i> Exporter</button>
-                        <button class="btn-icon danger" onclick="unplanAll()"><i class="fas fa-trash"></i> Effacer tout</button>
                     </div>
                     <div class="card">
                         <div class="table-container">
@@ -250,9 +249,12 @@
                         <div class="table-container"><table id="p7_done_table"><thead></thead><tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
                 </div>
+
+            </main>
+        </div>
         
         <!-- Signature -->
-<div class="footer-fix"><span style="color: #FFFFFF;">Developed by</span> <span style="color: #25E2CC; font-weight: 700;">TEAM TMM 🦄</span></div>
+        <div class="footer-fix"><span style="color: #FFFFFF;">Developed by</span> <span style="color: #25E2CC; font-weight: 700;">TEAM TMM 🦄</span></div>
     </div>
 
     <script src="/static/app.js"></script>
