@@ -372,22 +372,12 @@ async function loadDashboard() {
         renderDynamicTable(result.done_visites || [], 'p7_done_body');
         
         if (result.charts) {
-            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, barmode: 'group' };
+            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
             
             Plotly.purge(chart1Div);
             Plotly.purge(chart2Div);
             Plotly.purge(chart3Div);
             
-            // Chart 1
-            const c1 = result.charts.chart1 || [];
-            if (c1.length > 0) {
-                const faite_arr = c1.map(d => d.faite);
-                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-                const t2 = { x: c1.map(d=>d.project), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
-                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'outside', offsetgroup: '1', base: faite_arr };
-                Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
-            } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-
             // Chart 1
             const c1 = result.charts.chart1 || [];
             if (c1.length > 0) {
@@ -414,7 +404,7 @@ async function loadDashboard() {
                 const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max2 * 1.15] } };
                 Plotly.newPlot(chart2Div, [t1, t2, t3], layout2);
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-            
+
             // Chart 3
             const c3 = result.charts.chart3 || {effectuee:0, reste:0, non_planifie:0};
             if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
