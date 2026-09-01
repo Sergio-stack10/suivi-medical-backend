@@ -1,393 +1,261 @@
-let deleteTarget = null;
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>➕</text></svg>">
+    <meta charset="UTF-8">
+    <title>Suivi Visites Médicales</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
 
-// ==========================================
-// AUTH
-// ==========================================
-window.addEventListener('DOMContentLoaded', () => {
-    if (localStorage.getItem('isLoggedIn') === 'true') {
-        document.getElementById('authOverlay').classList.remove('show');
-        document.getElementById('appContainer').classList.add('show');
-        const user = localStorage.getItem('username') || 'Admin';
-        document.getElementById('userInfo').innerText = user;
-        document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
-    }
-});
+    <!-- Écran de Connexion -->
+    <div id="authOverlay" class="show">
+        <div class="auth-card" id="authCard">
+            <div class="auth-logo"><i class="fas fa-user-doctor"></i></div>
+            <h1 class="auth-title">Suivi Visites Médicales</h1>
+            <p class="auth-subtitle">Veuillez vous connecter pour accéder à l'application.</p>
+            <div class="input-group"><label for="loginUser">Nom d'utilisateur</label><div class="input-wrapper"><i class="fas fa-user"></i><input type="text" id="loginUser" placeholder="Utilisateur"></div></div>
+            <div class="input-group"><label for="loginPass">Mot de passe</label><div class="input-wrapper"><i class="fas fa-key"></i><input type="password" id="loginPass" placeholder="••••••••"></div></div>
+            <button id="loginBtn" class="auth-btn" onclick="handleLogin()">Se connecter</button>
+            <div id="authError" class="auth-error">Identifiants incorrects.</div>
+        </div>
+    </div>
 
-function handleLogin() {
-    const user = document.getElementById('loginUser').value;
-    const pass = document.getElementById('loginPass').value;
-    if ((user === 'wfm_admin' && pass === 'WFM2026') || (user === 'cnx_viewer' && pass === 'Visite2026')) {
-        document.getElementById('authOverlay').classList.remove('show');
-        document.getElementById('appContainer').classList.add('show');
-        document.getElementById('userInfo').innerText = user;
-        document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
-        localStorage.setItem('isLoggedIn', 'true');
-        localStorage.setItem('username', user);
-    } else {
-        document.getElementById('authError').style.display = 'block';
-    }
-}
+    <!-- Modale de Validation -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-icon"><i class="fas fa-exclamation-triangle"></i></div>
+            <h2 class="modal-title">Confirmer la suppression</h2>
+            <p id="modalText" class="modal-text">Voulez-vous vraiment supprimer ces données ?</p>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeModal()">Annuler</button>
+                <button class="btn-confirm" id="modalConfirmBtn">Supprimer</button>
+            </div>
+        </div>
+    </div>
 
-function handleLogout() {
-    document.getElementById('appContainer').classList.remove('show');
-    document.getElementById('authOverlay').classList.add('show');
-    localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('username');
-}
+    <!-- App Principal -->
+    <div id="appContainer">
+        <div class="top-nav">
+            <button class="menu-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+            <div class="nav-tabs">
+                <button class="top-tab active" onclick="switchPage('p1', this)"><i class="fas fa-file-excel"></i> Planning</button>
+                <button class="top-tab" onclick="switchPage('p2', this)"><i class="fas fa-users"></i> Collaborateurs</button>
+                <button class="top-tab" onclick="switchPage('p3', this)"><i class="fas fa-calendar-plus"></i> Génération</button>
+                <button class="top-tab" onclick="switchPage('p4', this)"><i class="fas fa-list-check"></i> Planning généré</button>
+                <button class="top-tab" onclick="switchPage('p5', this)"><i class="fas fa-notes-medical"></i> Suivi</button>
+                <button class="top-tab" onclick="switchPage('p6', this)"><i class="fas fa-user-slash"></i> Absences</button>
+                <button class="top-tab" onclick="switchPage('p7', this)"><i class="fas fa-chart-pie"></i> Dashboard</button>
+            </div>
+            <div class="user-zone">
+                <div class="user-avatar" id="userAvatar">A</div>
+                <span id="userInfo">Admin</span>
+                <button class="logout-btn-top" onclick="handleLogout()"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+        </div>
 
-// ==========================================
-// LAYOUT & NAV
-// ==========================================
-function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('hidden');
-    setTimeout(() => {
-        if (document.getElementById('chart1_div')) Plotly.Plots.resize('chart1_div');
-        if (document.getElementById('chart2_div')) Plotly.Plots.resize('chart2_div');
-        if (document.getElementById('chart3_div')) Plotly.Plots.resize('chart3_div');
-    }, 300);
-}
+        <div class="layout-body">
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header"><h3><i class="fas fa-folder-open"></i> Importations</h3></div>
+                
+                <div class="import-block">
+                    <h4><i class="fas fa-calendar-days"></i> Plannings</h4>
+                    <input type="text" id="planning_week_name" placeholder="Nom semaine (ex: S35)" class="form-control" style="margin-bottom: 5px; font-size: 12px; padding: 5px;">
+                    <input type="file" id="planningFiles" multiple accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('planningFiles', 'planning', 'p1_table_body', 'p1_status')"><i class="fas fa-upload"></i> Importer</button>
+                    <div id="p1_status" class="status-box small"></div>
+                </div>
 
-function switchPage(pageId, element) {
-    document.querySelectorAll('.page-content').forEach(div => div.classList.remove('active'));
-    document.querySelectorAll('.top-tab').forEach(btn => btn.classList.remove('active'));
-    document.getElementById('page-' + pageId).classList.add('active');
-    element.classList.add('active');
-    if (pageId === 'p1') loadWeeksDropdown();
-    if (pageId === 'p3') { loadWeeks(); loadGenerated(); }
-    if (pageId === 'p4') { loadGenerated(); }
-    if (pageId === 'p6') loadAbsences();
-    if (pageId === 'p7') loadDashboard();
-}
+                <div class="import-block">
+                    <h4><i class="fas fa-users"></i> Collaborateurs</h4>
+                    <input type="file" id="collabFiles" accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('collabFiles', 'collab', 'p2_table_body', 'p2_status')"><i class="fas fa-upload"></i> Importer</button>
+                    <div id="p2_status" class="status-box small"></div>
+                </div>
 
-// ==========================================
-// DATA MANAGEMENT (Modal, Delete, Export)
-// ==========================================
-function showDeleteModal(category) {
-    deleteTarget = category;
-    document.getElementById('confirmModal').classList.add('show');
-}
+                <div class="import-block">
+                    <h4><i class="fas fa-notes-medical"></i> Fichier Suivi (RTA)</h4>
+                    <input type="file" id="suiviFiles" accept=".xlsx, .xls, .xlsb" class="file-input">
+                    <button class="btn-primary small" onclick="uploadFiles('suiviFiles', 'suivi', 'p5_table_body', 'p5_status')"><i class="fas fa-upload"></i> Importer</button>
+                    <div id="p5_status" class="status-box small"></div>
+                </div>
+            </aside>
 
-function closeModal() {
-    document.getElementById('confirmModal').classList.remove('show');
-    deleteTarget = null;
-}
+            <main class="main-content">
+                
+                <!-- Page 1 -->
+                <div id="page-p1" class="page-content active">
+                    <div class="page-header"><h1>Planning MC & River</h1></div>
+                    <div class="action-bar">
+                        <select id="p1_week_select" onchange="loadSelectedPlanning()" style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-weight: 600; color: #555;"></select>
+                        <button class="btn-icon" onclick="loadWeeksDropdown()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('planning')"><i class="fas fa-file-excel"></i> Exporter</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('planning')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p1_table">
+                                <thead></thead>
+                                <tbody id="p1_table_body"><tr><td class="empty-msg">Aucune donnée importée.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-document.getElementById('modalConfirmBtn').addEventListener('click', async () => {
-    if (!deleteTarget) return;
-    try {
-        const res = await fetch(`/api/delete/${deleteTarget}`, { method: 'DELETE' });
-        const result = await res.json();
-        alert(result.message);
-        if (deleteTarget === 'planning') renderDynamicTable([], 'p1_table_body');
-        if (deleteTarget === 'collab') renderDynamicTable([], 'p2_table_body');
-        if (deleteTarget === 'suivi') renderDynamicTable([], 'p5_table_body');
-        closeModal();
-    } catch (e) {
-        alert("Erreur lors de la suppression.");
-        closeModal();
-    }
-});
+                <!-- Page 2 -->
+                <div id="page-p2" class="page-content">
+                    <div class="page-header"><h1>Liste des Collaborateurs</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="window.location.reload()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('collab')"><i class="fas fa-file-excel"></i> Exporter</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('collab')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p2_table">
+                                <thead></thead>
+                                <tbody id="p2_table_body"><tr><td class="empty-msg">Aucune donnée importée.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-function exportData(category) {
-    window.location.href = `/api/export/${category}`;
-}
-// ==========================================
-// PAGE 1 : PLANNING (Sélection de semaine)
-// ==========================================
-async function loadWeeksDropdown() {
-    try {
-        const res = await fetch('/api/weeks');
-        const data = await res.json();
-        const select = document.getElementById('p1_week_select');
-        select.innerHTML = '';
-        if (data.weeks.length === 0) {
-            select.innerHTML = '<option>Aucune semaine</option>';
-            return;
-        }
-        data.weeks.forEach(week => {
-            const option = document.createElement('option');
-            option.value = week.name;
-            option.innerText = week.name;
-            select.appendChild(option);
-        });
-        loadSelectedPlanning();
-    } catch (e) {}
-}
+                <!-- Page 3 -->
+                <div id="page-p3" class="page-content">
+                    <div class="page-header"><h1>Génération Planning Visite</h1></div>
+                    <div class="card gen-form-card">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Semaine à planifier</label>
+                                <select id="week_select" onchange="updateWeekDates()"></select>
+                            </div>
+                        </div>
+                        <div class="days-grid" id="days_grid"></div>
+                        <button class="btn-primary" onclick="generatePlanning()" style="margin-top: 20px; width: 100%;"><i class="fas fa-rocket"></i> Générer la planification</button>
+                        <div id="p3_status" class="status-box" style="margin-top: 15px;"></div>
+                    </div>
+                    <div class="card" style="margin-top: 20px;">
+                        <div class="action-bar" style="padding: 15px 25px 0 25px;">
+                            <button class="btn-icon export" onclick="exportData('generated')"><i class="fas fa-file-excel"></i> Exporter le généré</button>
+                            <button class="btn-icon danger" onclick="unplanAll()"><i class="fas fa-trash"></i> Effacer la planification</button>
+                        </div>
+                        <div class="card-header" style="margin-top: 15px;">Personnes planifiées</div>
+                        <div class="table-container">
+                            <table id="p3_table">
+                                <thead></thead>
+                                <tbody id="p3_table_body"><tr><td class="empty-msg">Aucune planification générée.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-async function loadSelectedPlanning() {
-    const weekName = document.getElementById('p1_week_select').value;
-    if (!weekName || weekName === 'Aucune semaine') return;
-    try {
-        const res = await fetch(`/api/get_planning/${weekName}`);
-        const result = await res.json();
-        renderDynamicTable(result.data, 'p1_table_body');
-    } catch(e) {}
-}
+                <!-- Page 4 -->
+                <div id="page-p4" class="page-content">
+                    <div class="page-header"><h1>Planning généré</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="loadGenerated()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('generated')"><i class="fas fa-file-excel"></i> Exporter</button>
+                        <button class="btn-icon danger" onclick="unplanAll()"><i class="fas fa-trash"></i> Effacer tout</button>
+                    </div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p4_table">
+                                <thead></thead>
+                                <tbody id="p4_table_body"><tr><td class="empty-msg">Cliquez sur Actualiser.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-// ==========================================
-// IMPORTS
-// ==========================================
-async function uploadFiles(inputId, category, tbodyId, statusId) {
-    const fileInput = document.getElementById(inputId);
-    const statusMsg = document.getElementById(statusId);
-    
-    if (!fileInput.files.length) { 
-        statusMsg.innerText = "⚠️ Aucun fichier."; 
-        return; 
-    }
+                <!-- Page 5 -->
+                <div id="page-p5" class="page-content">
+                    <div class="page-header"><h1>Fichier Suivi (RTA)</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="window.location.reload()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('suivi')"><i class="fas fa-file-excel"></i> Exporter</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('suivi')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p5_table">
+                                <thead></thead>
+                                <tbody id="p5_table_body"><tr><td class="empty-msg">Aucune donnée importée.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-    const formData = new FormData();
-    for (let i = 0; i < fileInput.files.length; i++) formData.append("files", fileInput.files[i]);
-    formData.append("category", category);
-    
-    if (category === 'planning') {
-        const weekInput = document.getElementById('planning_week_name');
-        if (weekInput && weekInput.value) formData.append('week_name', weekInput.value);
-    }
+                <!-- Page 6 -->
+                <div id="page-p6" class="page-content">
+                    <div class="page-header"><h1>Absences</h1></div>
+                    <div class="action-bar">
+                        <button class="btn-icon" onclick="loadAbsences()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('absences')"><i class="fas fa-file-excel"></i> Exporter</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('absences')"><i class="fas fa-trash"></i> Supprimer</button>
+                    </div>
+                    <div class="card">
+                        <div class="table-container">
+                            <table id="p6_table">
+                                <thead></thead>
+                                <tbody id="p6_table_body"><tr><td class="empty-msg">Cliquez sur Actualiser pour charger.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-    statusMsg.innerText = "⏳ Traitement...";
-    const tbody = document.getElementById(tbodyId);
-    let thead = tbody.closest('table').querySelector('thead');
-    if (thead) thead.innerHTML = '';
-    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+                <!-- Page 7 -->
+                <div id="page-p7" class="page-content">
+                    <div class="page-header"><h1>Dashboard & Extractions</h1></div>
+                    
+                    <div class="action-bar" style="margin-bottom: 20px; align-items: center; background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                        <strong style="margin-right: 10px;">Filtrer par date :</strong>
+                        <input type="date" id="p7_start_date" class="form-control" style="max-width: 150px; padding: 5px;">
+                        <span>au</span>
+                        <input type="date" id="p7_end_date" class="form-control" style="max-width: 150px; padding: 5px;">
+                        <button class="btn-primary" onclick="loadDashboard()" style="padding: 8px 15px;"><i class="fas fa-filter"></i> Appliquer</button>
+                    </div>
 
-    try {
-        const response = await fetch('/api/import', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error("Erreur serveur");
-        const result = await response.json();
-        statusMsg.innerText = result.message;
-        if (result.data) renderDynamicTable(result.data, tbodyId);
-    } catch (error) {
-        statusMsg.innerText = "❌ Erreur : " + error.message;
-    }
-}
-
-function renderDynamicTable(data, tbodyId) {
-    const tbody = document.getElementById(tbodyId);
-    let thead = tbody.closest('table').querySelector('thead');
-    
-    if (!data || data.length === 0) {
-        if (thead) thead.innerHTML = '';
-        tbody.innerHTML = '<tr><td class="empty-msg">Aucune donnée.</td></tr>';
-        return;
-    }
-    
-    const keys = Object.keys(data[0]);
-    if (thead) thead.innerHTML = '<tr>' + keys.map(k => `<th>${k}</th>`).join('') + '</tr>';
-    
-    tbody.innerHTML = '';
-    data.forEach(row => {
-        const tr = document.createElement('tr');
-        keys.forEach(key => {
-            const td = document.createElement('td');
-            td.innerText = row[key] !== null ? row[key] : '';
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-    });
-}
-
-// ==========================================
-// PAGE 3 & 4 : GÉNÉRATION & PLANNING GÉNÉRÉ
-// ==========================================
-async function loadWeeks() {
-    try {
-        const res = await fetch('/api/weeks');
-        const data = await res.json();
-        const select = document.getElementById('week_select');
-        select.innerHTML = '';
-        if (data.weeks.length === 0) {
-            select.innerHTML = '<option>Aucune semaine</option>';
-            return;
-        }
-        data.weeks.forEach(week => {
-            const option = document.createElement('option');
-            option.value = week.name;
-            option.innerText = week.name;
-            option.dataset.dates = JSON.stringify(week.dates);
-            select.appendChild(option);
-        });
-        updateWeekDates();
-    } catch (e) {}
-}
-
-function updateWeekDates() {
-    const select = document.getElementById('week_select');
-    const weekName = select.value;
-    if (!weekName) return;
-    
-    const selectedOption = select.options[select.selectedIndex];
-    const dates = JSON.parse(selectedOption.dataset.dates || '[]');
-    
-    const daysGrid = document.getElementById('days_grid');
-    daysGrid.innerHTML = '';
-    const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
-    
-    for (let i = 0; i < 5; i++) {
-        const dateStr = dates[i] || new Date().toISOString().split('T')[0];
+                    <div class="cards-grid" id="p7_metrics" style="margin-bottom: 20px;">
+                        <div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>
+                    </div>
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">1. Total à passer vs (Planifié + Effectuée) par projet</div>
+                        <div id="chart1_div" style="width:100%; min-height:400px; padding: 15px;"></div>
+                    </div>
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">2. Planifié vs (Effectuée + Absent) par date</div>
+                        <div id="chart2_div" style="width:100%; min-height:400px; padding: 15px;"></div>
+                    </div>
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">3. Avancement Global</div>
+                        <div id="chart3_div" style="width:100%; min-height:400px; padding: 15px; display: flex; justify-content: center;"></div>
+                    </div>
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">Durée moyenne par jour</div>
+                        <div class="table-container"><table id="p7_avg_table"><thead></thead><tbody id="p7_avg_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
+                    </div>
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div class="card-header">Top 5 des durées les plus élevées</div>
+                        <div class="table-container"><table id="p7_top5_table"><thead></thead><tbody id="p7_top5_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
+                    </div>
+                    <div class="card">
+                        <div class="action-bar" style="padding: 15px 25px 0 25px;">
+                            <button class="btn-icon export" onclick="exportData('done_visites')"><i class="fas fa-file-excel"></i> Exporter la liste</button>
+                        </div>
+                        <div class="card-header" style="margin-top: 15px;">Liste des visites effectuées (OK)</div>
+                        <div class="table-container"><table id="p7_done_table"><thead></thead><tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
+                    </div>
+                </div>
         
-        const card = document.createElement('div');
-        card.className = 'day-card';
-        card.innerHTML = `
-            <div class="day-title">${days[i]} <input type="checkbox" checked onchange="this.closest('.day-card').classList.toggle('disabled', !this.checked)"></div>
-            <div class="day-input-group"><label>Date</label><input type="date" class="form-control" value="${dateStr}" disabled></div>
-            <div class="day-input-group"><label>Début</label><input type="time" class="form-control" value="09:00"></div>
-            <div class="day-input-group"><label>Fin</label><input type="time" class="form-control" value="16:00"></div>
-            <div class="day-input-group"><label>Nb River</label><input type="number" class="form-control" value="5" min="0"></div>
-            <div class="day-input-group"><label>Nb Autres</label><input type="number" class="form-control" value="20" min="0"></div>
-            <div class="day-input-group"><label>Priorité</label><select class="form-control"><option>Aucune priorité</option><option>Visite systématique</option><option>Visite d'embauche</option></select></div>
-            <div class="day-input-group"><label>Statut</label><select class="form-control"><option>Tous</option><option>CC</option><option>ENC</option></select></div>
-        `;
-        daysGrid.appendChild(card);
-    }
-}
+        <!-- Signature -->
+<div class="footer-fix"><span style="color: #FFFFFF;">Developed by</span> <span style="color: #25E2CC; font-weight: 700;">TEAM TMM 🦄</span></div>
+    </div>
 
-async function unplanAll() {
-    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications (dates de visites assignées) ?')) {
-        await fetch('/api/unplan', { method: 'POST' });
-        loadGenerated(); // Recharge P3 et P4
-        alert("Planifications effacées.");
-    }
-}
-
-async function generatePlanning() {
-    const week = document.getElementById('week_select').value;
-    const statusMsg = document.getElementById('p3_status');
-    const cards = document.querySelectorAll('.day-card');
-    const config = { week: week, days: [] };
-    
-    cards.forEach(card => {
-        config.days.push({
-            actif: card.querySelector('input[type="checkbox"]').checked,
-            date: card.querySelector('input[type="date"]').value,
-            debut: card.querySelectorAll('input[type="time"]')[0].value,
-            fin: card.querySelectorAll('input[type="time"]')[1].value,
-            qty_river: card.querySelector('input[type="number"]').value,
-            qty_others: card.querySelectorAll('input[type="number"]')[1].value,
-            prio: card.querySelectorAll('select')[0].value,
-            statut_filter: card.querySelectorAll('select')[1].value
-        });
-    });
-
-    statusMsg.innerText = "⏳ Génération...";
-    try {
-        const formData = new FormData();
-        formData.append('config', JSON.stringify(config));
-        const res = await fetch('/api/generate', { method: 'POST', body: formData });
-        const result = await res.json();
-        statusMsg.innerText = result.message;
-        loadGenerated();
-    } catch (e) {
-        statusMsg.innerText = "❌ Erreur.";
-    }
-}
-
-async function loadGenerated() {
-    try {
-        const res = await fetch('/api/generated');
-        const result = await res.json();
-        renderDynamicTable(result.data, 'p3_table_body');
-        renderDynamicTable(result.data, 'p4_table_body');
-    } catch(e) {}
-}
-
-async function unplanAll() {
-    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications générées ?')) {
-        await fetch('/api/unplan', { method: 'POST' });
-        loadGenerated();
-    }
-}
-
-// ==========================================
-// PAGE 6 & 7
-// ==========================================
-async function loadAbsences() {
-    const tbody = document.getElementById('p6_table_body');
-    let thead = document.querySelector('#p6_table thead');
-    if (thead) thead.innerHTML = '';
-    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    try {
-        const res = await fetch('/api/absences');
-        const result = await res.json();
-        renderDynamicTable(result.data, 'p6_table_body');
-    } catch(e) {
-        tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>';
-    }
-}
-
-async function loadDashboard() {
-    const metricsDiv = document.getElementById('p7_metrics');
-    const avgBody = document.getElementById('p7_avg_body');
-    const top5Body = document.getElementById('p7_top5_body');
-    const doneBody = document.getElementById('p7_done_body');
-    const chart1Div = document.getElementById('chart1_div');
-    const chart2Div = document.getElementById('chart2_div');
-    const chart3Div = document.getElementById('chart3_div');
-    
-    // Récupérer les valeurs du filtre de date
-    const startDate = document.getElementById('p7_start_date').value;
-    const endDate = document.getElementById('p7_end_date').value;
-    
-    let url = '/api/dashboard?';
-    if (startDate) url += `start_date=${startDate}&`;
-    if (endDate) url += `end_date=${endDate}&`;
-    
-    metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
-    if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    if (doneBody) doneBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-
-    try {
-        const res = await fetch(url);
-        const result = await res.json();
-        const m = result.metrics;
-        
-        metricsDiv.innerHTML = `
-            <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
-            <div class="metric-card"><div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div><div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div></div>
-            <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
-            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste_a_planifier || 0}</h3><p>Reste à planifier</p></div></div>
-        `;
-        
-        renderDynamicTable(result.avg_duration, 'p7_avg_body');
-        renderDynamicTable(result.top5, 'p7_top5_body');
-        renderDynamicTable(result.done_visites, 'p7_done_body');
-        
-        if (result.charts) {
-            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, barmode: 'group' };
-            
-            Plotly.purge(chart1Div);
-            Plotly.purge(chart2Div);
-            Plotly.purge(chart3Div);
-            
-            // Graphique 1 : Total à passer | Planifié (base) + Effectuée (empilé)
-            const c1 = result.charts.chart1;
-            if (c1 && c1.length > 0) {
-                const planifie_arr = c1.map(d => d.planifie);
-                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-                const t2 = { x: c1.map(d=>d.project), y: planifie_arr, type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: planifie_arr, textposition: 'outside', offsetgroup: '1' };
-                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '1', base: planifie_arr };
-                Plotly.newPlot(chart1Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
-            } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-
-            // Graphique 2 : Planifié | Effectuée (base) + Absent (empilé)
-            const c2 = result.charts.chart2;
-            if (c2 && c2.length > 0) {
-                const faite_arr = c2.map(d => d.faite);
-                const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
-                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
-                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Absent', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '1', base: faite_arr };
-                Plotly.newPlot(chart2Div, [t1, t2, t3], {...layout, legend: {title: {text: 'Légende'}}});
-            } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-
-            // Graphique 3 (Camembert)
-            const c3 = result.charts.chart3;
-            if (c3 && (c3.effectuee + c3.reste + c3.non_planifie > 0)) {
-                const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
-                Plotly.newPlot(chart3Div, data3, {...layout, barmode: null, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}});
-            } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-        }
-    } catch(e) {
-        metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur</h3></div></div>';
-    }
-}
+    <script src="/static/app.js"></script>
+</body>
+</html>
