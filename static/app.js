@@ -70,7 +70,7 @@ function switchPage(pageId, element) {
     document.querySelectorAll('.top-tab').forEach(btn => btn.classList.remove('active'));
     document.getElementById('page-' + pageId).classList.add('active');
     element.classList.add('active');
-    
+
     if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
     if (pageId === 'p3') { loadWeeks(); loadGenerated(); pageCache.p4 = true; }
     if (pageId === 'p4' && !pageCache.p4) { loadGenerated(); pageCache.p4 = true; }
@@ -97,12 +97,12 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
         const res = await fetch(`/api/delete/${deleteTarget}`, { method: 'DELETE' });
         const result = await res.json();
         alert(result.message);
-        
+
         if (deleteTarget === 'planning') { renderDynamicTable([], 'p1_table_body'); clearCache(['p1', 'p3', 'p4']); }
         if (deleteTarget === 'collab') { renderDynamicTable([], 'p2_table_body'); clearCache(['p2', 'p3', 'p4']); }
         if (deleteTarget === 'suivi') { renderDynamicTable([], 'p5_table_body'); clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
         if (deleteTarget === 'non_effectuees') { renderDynamicTable([], 'p6_table_body'); clearCache(['p6']); }
-        
+
         closeModal();
     } catch (e) {
         alert("Erreur lors de la suppression.");
@@ -120,16 +120,16 @@ function exportData(category) {
 async function uploadFiles(inputId, category, tbodyId, statusId) {
     const fileInput = document.getElementById(inputId);
     const statusMsg = document.getElementById(statusId);
-    
-    if (!fileInput.files.length) { 
-        statusMsg.innerText = "⚠️ Aucun fichier."; 
-        return; 
+
+    if (!fileInput.files.length) {
+        statusMsg.innerText = "⚠️ Aucun fichier.";
+        return;
     }
 
     const formData = new FormData();
     for (let i = 0; i < fileInput.files.length; i++) formData.append("files", fileInput.files[i]);
     formData.append("category", category);
-    
+
     if (category === 'planning') {
         const weekInput = document.getElementById('planning_week_name');
         if (weekInput && weekInput.value) formData.append('week_name', weekInput.value);
@@ -147,15 +147,18 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         const result = await response.json();
         statusMsg.innerText = result.message;
         if (result.data) renderDynamicTable(result.data, tbodyId);
-        
+
+        // ★ Rafraîchissement automatique selon le type d'import
         if (category === 'planning') {
             clearCache(['p1', 'p3', 'p4']);
-            await loadWeeksDropdown();
+            await loadWeeksDropdown(); // recharge le menu des semaines + le tableau page 1
         }
         if (category === 'collab') clearCache(['p2', 'p3', 'p4']);
         if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
-        if (category === 'legacy') { clearCache(['p3', 'p4']); loadGenerated(); }        
-        
+        if (category === 'generated_planning' || category === 'legacy') {
+            clearCache(['p3', 'p4']);
+            loadGenerated();
+        }
     } catch (error) {
         statusMsg.innerText = "❌ Erreur : " + error.message;
     }
@@ -165,16 +168,16 @@ function renderDynamicTable(data, tbodyId) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
     let thead = tbody.closest('table').querySelector('thead');
-    
+
     if (!data || data.length === 0) {
         if (thead) thead.innerHTML = '';
         tbody.innerHTML = '<tr><td class="empty-msg">Aucune donnée.</td></tr>';
         return;
     }
-    
+
     const keys = Object.keys(data[0]);
     if (thead) thead.innerHTML = '<tr>' + keys.map(k => `<th>${k}</th>`).join('') + '</tr>';
-    
+
     tbody.innerHTML = '';
     data.forEach(row => {
         const tr = document.createElement('tr');
@@ -190,22 +193,23 @@ function renderDynamicTable(data, tbodyId) {
 // ==========================================
 // PAGE 1 : PLANNING
 // ==========================================
-async function loadWeeks() {
+// ★★ FONCTION RESTAURÉE : c'est elle qui manquait et provoquait l'erreur ★★
+async function loadWeeksDropdown() {
     try {
         const res = await fetch('/api/weeks');
         const data = await res.json();
-        const select = document.getElementById('week_select');
+        const select = document.getElementById('p1_week_select');
         select.innerHTML = '';
         if (data.weeks.length === 0) { select.innerHTML = '<option>Aucune semaine</option>'; return; }
         data.weeks.forEach(week => {
             const option = document.createElement('option');
             option.value = week.name; option.innerText = week.name;
-            option.dataset.dates = JSON.stringify(week.dates || []);  // ★ AJOUT
             select.appendChild(option);
         });
-        updateWeekDates();
-    } catch (e) { console.error('Err loadWeeks:', e); }
+        loadSelectedPlanning();
+    } catch (e) { console.error('Err loadWeeksDropdown:', e); }
 }
+
 async function loadSelectedPlanning() {
     const weekName = document.getElementById('p1_week_select').value;
     if (!weekName || weekName === 'Aucune semaine') return;
@@ -213,12 +217,13 @@ async function loadSelectedPlanning() {
         const res = await fetch(`/api/get_planning/${weekName}`);
         const result = await res.json();
         renderDynamicTable(result.data, 'p1_table_body');
-    } catch(e) { console.error('Err loadSelectedPlanning:', e); }
+    } catch (e) { console.error('Err loadSelectedPlanning:', e); }
 }
 
 // ==========================================
 // PAGE 3 & 4 : GÉNÉRATION & PLANNING GÉNÉRÉ
 // ==========================================
+// ★ Version avec transmission des dates (menu déroulant de la page 3)
 async function loadWeeks() {
     try {
         const res = await fetch('/api/weeks');
@@ -229,12 +234,14 @@ async function loadWeeks() {
         data.weeks.forEach(week => {
             const option = document.createElement('option');
             option.value = week.name; option.innerText = week.name;
+            option.dataset.dates = JSON.stringify(week.dates || []); // ★ transmet les dates de la semaine
             select.appendChild(option);
         });
         updateWeekDates();
     } catch (e) { console.error('Err loadWeeks:', e); }
 }
 
+// ★ Dates pré-remplies depuis le planning enregistré, mais MODIFIABLES
 function updateWeekDates() {
     const select = document.getElementById('week_select');
     const weekName = select.value;
@@ -297,7 +304,7 @@ async function loadGenerated() {
         const result = await res.json();
         renderDynamicTable(result.data, 'p3_table_body');
         renderDynamicTable(result.data, 'p4_table_body');
-    } catch(e) { console.error('Err loadGenerated:', e); }
+    } catch (e) { console.error('Err loadGenerated:', e); }
 }
 
 async function unplanAll() {
@@ -321,7 +328,7 @@ async function loadNonEffectuees() {
         const res = await fetch('/api/non_effectuees');
         const result = await res.json();
         renderDynamicTable(result.data, 'p6_table_body');
-    } catch(e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
+    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
 }
 
 async function loadDashboard() {
@@ -332,13 +339,13 @@ async function loadDashboard() {
     const chart1Div = document.getElementById('chart1_div');
     const chart2Div = document.getElementById('chart2_div');
     const chart3Div = document.getElementById('chart3_div');
-    
+
     const startDate = document.getElementById('p7_start_date') ? document.getElementById('p7_start_date').value : '';
     const endDate = document.getElementById('p7_end_date') ? document.getElementById('p7_end_date').value : '';
     let url = '/api/dashboard?';
     if (startDate) url += `start_date=${startDate}&`;
     if (endDate) url += `end_date=${endDate}&`;
-    
+
     metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
     if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
@@ -346,47 +353,47 @@ async function loadDashboard() {
 
     try {
         const res = await fetch(url);
-        if(!res.ok) throw new Error("Erreur réseau " + res.status);
+        if (!res.ok) throw new Error("Erreur réseau " + res.status);
         dashboardData = await res.json();
         const m = dashboardData.metrics || {};
-        
+
         metricsDiv.innerHTML = `
             <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
             <div class="metric-card"><div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div><div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div></div>
             <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
             <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste_a_planifier || 0}</h3><p>Reste à planifier</p></div></div>
         `;
-        
+
         renderDynamicTable(dashboardData.avg_duration || [], 'p7_avg_body');
         renderDynamicTable(dashboardData.top5 || [], 'p7_top5_body');
         renderDynamicTable(dashboardData.done_visites || [], 'p7_done_body');
-        
+
         // Chart 1
-        populateProjFilter(); // Remplir la liste à cases à cocher
-        filterChart1();       // Dessiner le graphique filtré
-        
+        populateProjFilter();
+        filterChart1();
+
         // Chart 2
         const c2 = dashboardData.charts.chart2 || [];
         if (c2.length > 0) {
             const max2 = Math.max(...c2.map(d => d.planifie));
             const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
             const faite_arr = c2.map(d => d.faite);
-            const date_order = c2.map(d=>d.date);
-            const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
-            const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' };
-            const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max2 * 1.15] } };
+            const date_order = c2.map(d => d.date);
+            const t1 = { x: c2.map(d => d.date), y: c2.map(d => d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d => d.planifie), textposition: 'outside', offsetgroup: '0' };
+            const t2 = { x: c2.map(d => d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' };
+            const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: { title: { text: 'Légende' } }, margin: { t: 50, b: 100 }, yaxis: { range: [0, max2 * 1.15] } };
             Plotly.newPlot(chart2Div, [t1, t2], layout2);
         } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
         // Chart 3
-        const c3 = dashboardData.charts.chart3 || {effectuee:0, reste:0, non_planifie:0};
+        const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
         if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
             const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
-            const layout3 = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}};
+            const layout3 = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, showlegend: false, margin: { t: 40, b: 20, l: 20, r: 20 } };
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-    } catch(e) {
+    } catch (e) {
         console.error("Err loadDashboard:", e);
         metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur de chargement</h3></div></div>';
     }
@@ -395,6 +402,7 @@ async function loadDashboard() {
 // ==========================================
 // LOGIQUE FILTRE GRAPHIQUE 1 (CHECKBOXES)
 // ==========================================
+// ★ Menu déroulant repliable en popover
 function toggleProjDropdown(event) {
     event.stopPropagation();
     const list = document.getElementById("proj_checkbox_list");
@@ -410,13 +418,13 @@ function closeProjDropdown() {
     if (box) box.classList.remove('open');
 }
 
-// Fermeture au clic extérieur
-window.addEventListener('click', function(event) {
+// Fermeture au clic à l'extérieur
+window.addEventListener('click', function (event) {
     if (!event.target.closest('.multiselect-container')) closeProjDropdown();
 });
 
 // Fermeture avec la touche Échap
-document.addEventListener('keydown', function(event) {
+document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeProjDropdown();
 });
 
@@ -426,8 +434,7 @@ function populateProjFilter() {
     const container = document.getElementById("proj_checkbox_list");
     container.innerHTML = '';
     const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
-    
-    // Option "Tous"
+
     const allDiv = document.createElement("div");
     allDiv.innerHTML = `<input type="checkbox" id="proj_all" checked onchange="onProjChange()"> <label for="proj_all" style="margin-left:5px; font-weight:bold;">Tous les projets</label>`;
     container.appendChild(allDiv);
@@ -444,7 +451,7 @@ function onProjChange() {
     const allBox = document.getElementById("proj_all");
     const itemBoxes = document.querySelectorAll('.proj_item');
     const isAllClicked = event.target.id === "proj_all";
-    
+
     if (isAllClicked) {
         itemBoxes.forEach(cb => cb.checked = allBox.checked);
     } else {
@@ -478,22 +485,22 @@ function filterChart1() {
     const itemBoxes = document.querySelectorAll('.proj_item');
     const selectedProjs = Array.from(itemBoxes).filter(cb => cb.checked).map(cb => cb.value);
     const allBox = document.getElementById("proj_all");
-    
+
     let filteredC1;
     if (allBox.checked || selectedProjs.length === 0) {
         filteredC1 = c1;
     } else {
         filteredC1 = c1.filter(d => selectedProjs.includes(d.project));
     }
-    
+
     if (filteredC1.length > 0) {
         const max1 = Math.max(...filteredC1.map(d => d.total));
-        const t1 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-        const t3 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: filteredC1.map(d=>d.faite), textposition: 'inside', offsetgroup: '0' };
-        
-        const layout1 = { ...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max1 * 1.15] } };
+        const t1 = { x: filteredC1.map(d => d.project), y: filteredC1.map(d => d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d => d.total), textposition: 'outside', offsetgroup: '0' };
+        const t3 = { x: filteredC1.map(d => d.project), y: filteredC1.map(d => d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: filteredC1.map(d => d.faite), textposition: 'inside', offsetgroup: '0' };
+
+        const layout1 = { ...layout, barmode: 'overlay', legend: { title: { text: 'Légende' } }, margin: { t: 50, b: 100 }, yaxis: { range: [0, max1 * 1.15] } };
         Plotly.newPlot(chart1Div, [t1, t3], layout1);
-    } else { 
-        chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>'; 
+    } else {
+        chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>';
     }
 }
