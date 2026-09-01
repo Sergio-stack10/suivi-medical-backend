@@ -258,57 +258,72 @@ def parse_planning(files_data: list):
     return pd.DataFrame()
 
 def parse_liste_visite(filename: str, content: bytes):
-    engine = get_excel_engine(filename)
-    df = pd.read_excel(io.BytesIO(content), engine=engine)
-    cols_cleaned = [str(c).strip().upper() for c in df.columns]
-    df.columns = cols_cleaned
-    id_col = nom_col = prenom_col = projet_col = visite_col = hire_col = paid_col = statut_col = None
-    for c in df.columns:
-        if 'WORKDAY' in c or 'EMPLOYEE' in c or 'MATRICULE' in c: id_col = c
-        if 'LAST' in c and 'NAME' in c: nom_col = c
-        elif 'NOM' in c and nom_col is None: nom_col = c
-        if 'FIRST' in c and 'NAME' in c: prenom_col = c
-        if 'PROJET' in c or 'PROJECT' in c: projet_col = c
-        if 'VISITE' in c or 'TYPE' in c: visite_col = c
-        if 'HIRE' in c and 'DATE' in c: hire_col = c
-        if 'PREVIOUS PAYROLL' in c or 'PAID ID' in c or 'PAYROLL ID' in c: paid_col = c
-        if 'STATUT' in c or 'POSTE' in c or 'JOB' in c or 'TITLE' in c or 'POSITION' in c or 'ROLE' in c: statut_col = c
-    if id_col is None: return None
-    cols_to_keep = [id_col]
-    if paid_col: cols_to_keep.append(paid_col)
-    if nom_col: cols_to_keep.append(nom_col)
-    if prenom_col: cols_to_keep.append(prenom_col)
-    if projet_col: cols_to_keep.append(projet_col)
-    if visite_col: cols_to_keep.append(visite_col)
-    if hire_col: cols_to_keep.append(hire_col)
-    if statut_col: cols_to_keep.append(statut_col)
-    df = df[cols_to_keep].copy()
-    if projet_col: df['Projet'] = df[projet_col]
-    else: df['Projet'] = 'N/A'
-    if visite_col: df['Priorité Visite'] = df[visite_col]
-    else: df['Priorité Visite'] = 'N/A'
-    if prenom_col: df = df.rename(columns={prenom_col: 'Prénom'})
-    else: df['Prénom'] = ''
-    if hire_col: df = df.rename(columns={hire_col: 'Date d\'embauche'})
-    else: df['Date d\'embauche'] = pd.NaT
-    if paid_col: df = df.rename(columns={paid_col: 'Payroll ID'})
-    else: df['Payroll ID'] = ''
-    if statut_col:
-        raw_statut = df[statut_col].astype(str).str.upper()
-        df['Statut'] = raw_statut.apply(lambda x: 'CC' if 'ADVISOR' in x or 'CUSTOMER SERVICE' in x or 'CC' in x else 'ENC')
-    else: df['Statut'] = 'ENC'
-    df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
-    df = df.rename(columns={id_col: 'WORKDAY ID'})
-    if nom_col: df = df.rename(columns={nom_col: 'Nom'})
-    if 'Nom' not in df.columns: df['Nom'] = ''
-    df = df[df['WORKDAY ID'].notna()]
-    df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce')
-    df['Ancienneté'] = df['Date d\'embauche'].apply(calculate_anciennete)
-    df['Ancienneté_num'] = df['Date d\'embauche'].apply(calculate_anciennete_num)
-    final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite']
-    if 'Statut Visite' not in df.columns: df['Statut Visite'] = 'Non Planifié'
-    return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
-
+    try:
+        engine = get_excel_engine(filename)
+        df = pd.read_excel(io.BytesIO(content), engine=engine)
+        cols_cleaned = [str(c).strip().upper() for c in df.columns]
+        df.columns = cols_cleaned
+        
+        id_col = nom_col = prenom_col = projet_col = visite_col = hire_col = paid_col = statut_col = None
+        for c in df.columns:
+            if 'WORKDAY' in c or 'EMPLOYEE' in c or 'MATRICULE' in c: id_col = c
+            if 'LAST' in c and 'NAME' in c: nom_col = c
+            elif 'NOM' in c and nom_col is None: nom_col = c
+            if 'FIRST' in c and 'NAME' in c: prenom_col = c
+            if 'PROJET' in c or 'PROJECT' in c: projet_col = c
+            if 'VISITE' in c or 'TYPE' in c: visite_col = c
+            if 'HIRE' in c and 'DATE' in c: hire_col = c
+            if 'PREVIOUS PAYROLL' in c or 'PAID ID' in c or 'PAYROLL ID' in c: paid_col = c
+            if 'STATUT' in c or 'POSTE' in c or 'JOB' in c or 'TITLE' in c or 'POSITION' in c or 'ROLE' in c: statut_col = c
+            
+        if id_col is None: return None
+            
+        cols_to_keep = [id_col]
+        if paid_col: cols_to_keep.append(paid_col)
+        if nom_col: cols_to_keep.append(nom_col)
+        if prenom_col: cols_to_keep.append(prenom_col)
+        if projet_col: cols_to_keep.append(projet_col)
+        if visite_col: cols_to_keep.append(visite_col)
+        if hire_col: cols_to_keep.append(hire_col)
+        if statut_col: cols_to_keep.append(statut_col)
+        
+        df = df[cols_to_keep].copy()
+        
+        if projet_col: df['Projet'] = df[projet_col]
+        else: df['Projet'] = 'N/A'
+        if visite_col: df['Priorité Visite'] = df[visite_col]
+        else: df['Priorité Visite'] = 'N/A'
+        if prenom_col: df = df.rename(columns={prenom_col: 'Prénom'})
+        else: df['Prénom'] = ''
+        if hire_col: df = df.rename(columns={hire_col: 'Date d\'embauche'})
+        else: df['Date d\'embauche'] = pd.NaT
+        if paid_col: df = df.rename(columns={paid_col: 'Payroll ID'})
+        else: df['Payroll ID'] = ''
+        if statut_col:
+            raw_statut = df[statut_col].astype(str).str.upper()
+            df['Statut'] = raw_statut.apply(lambda x: 'CC' if 'ADVISOR' in x or 'CUSTOMER SERVICE' in x or 'CC' in x else 'ENC')
+        else: df['Statut'] = 'ENC'
+            
+        df = df.rename(columns={id_col: 'WORKDAY ID'})
+        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
+        
+        if nom_col: df = df.rename(columns={nom_col: 'Nom'})
+        if 'Nom' not in df.columns: df['Nom'] = ''
+        
+        df = df[df['WORKDAY ID'].notna()]
+        
+        df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce')
+        df['Ancienneté'] = df['Date d\'embauche'].apply(calculate_anciennete)
+        df['Ancienneté_num'] = df['Date d\'embauche'].apply(calculate_anciennete_num)
+        
+        df['Statut Visite'] = 'Non Planifié'
+        
+        final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite']
+        return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
+    except Exception as e:
+        print("ERREUR parse_liste_visite:", traceback.format_exc())
+        return None
+    
 def parse_rta_file(filename: str, content: bytes):
     engine = get_excel_engine(filename)
     xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
