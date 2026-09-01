@@ -148,7 +148,10 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         statusMsg.innerText = result.message;
         if (result.data) renderDynamicTable(result.data, tbodyId);
         
-        if (category === 'planning') clearCache(['p1', 'p3', 'p4']);
+        if (category === 'planning') {
+            clearCache(['p1', 'p3', 'p4']);
+            await loadWeeksDropdown();
+        }
         if (category === 'collab') clearCache(['p2', 'p3', 'p4']);
         if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
         if (category === 'legacy') { clearCache(['p3', 'p4']); loadGenerated(); }        
