@@ -6,6 +6,7 @@ from typing import List, Optional
 import pandas as pd
 import numpy as np
 import datetime
+import asyncio
 import io
 import re
 import json
@@ -14,7 +15,6 @@ import os
 import pickle
 import pymongo
 import bson
-import asyncio
 
 app = FastAPI()
 
@@ -64,13 +64,13 @@ def save_history():
     client = get_mongo_client()
     if client is None:
         try:
-            with open("app_state.pkl", "wb") as f: pickle.dump(app_state, f)
+            with open("app_state.pkl", "wb") as f: pickle.dump(app_state, f, protocol=pickle.HIGHEST_PROTOCOL)
         except: pass
         return
     try:
         db = client["visite_medicale_db"]
         collection = db["app_state"]
-        pickle_bytes = pickle.dumps(app_state)
+        pickle_bytes = pickle.dumps(app_state, protocol=pickle.HIGHEST_PROTOCOL)
         collection.update_one({"_id": 1}, {"$set": {"data": bson.Binary(pickle_bytes)}}, upsert=True)
     except: pass
 
@@ -80,25 +80,39 @@ load_history()
 async def read_root():
     with open(os.path.join("static", "index.html")) as f: return f.read()
 
+# ★★★ MODIFIÉ : moteur calamine (5-10x plus rapide) si disponible, sinon fallback
 def get_excel_engine(filename: str):
-    if filename.endswith('.xlsb'): return 'calamine'
-    elif filename.endswith('.xls'): return 'calamine'
-    return 'calamine'
+    try:
+        import python_calamine  # noqa
+        import pandas as _pd
+        from packaging import version as _v
+        if _v.parse(_pd.__version__) >= _v.parse('2.2'):
+            return 'calamine'
+    except Exception:
+        pass
+    if filename.endswith('.xlsb'): return 'pyxlsb'
+    elif filename.endswith('.xls'): return 'xlrd'
+    return 'openpyxl'
 
+# ★★★ MODIFIÉ : parsing robuste du numéro de semaine (S36, planning_S36_2026, semaine 36, etc.)
 def get_dates_from_week(week_name):
     name = str(week_name)
     year = datetime.date.today().year
-    y = re.search(r'(20\d{2})', name)
+    y = re.search(r'\b(20\d{2})\b', name)
     if y: year = int(y.group(1))
 
     week_num = None
-    m = re.search(r'[Ss](\d{1,2})', name)
+    m = re.search(r'\b[Ss](\d{1,2})\b', name)
     if m:
         week_num = int(m.group(1))
     else:
-        for n in re.findall(r'\d+', name):
-            if 1 <= int(n) <= 53:
-                week_num = int(n); break
+        m2 = re.search(r'[Ss]emaine\s*(\d{1,2})\b', name, re.IGNORECASE)
+        if m2:
+            week_num = int(m2.group(1))
+        else:
+            for n in re.findall(r'\d+', name):
+                if 1 <= int(n) <= 53:
+                    week_num = int(n); break
 
     if week_num:
         try:
@@ -233,6 +247,7 @@ def sync_statut_with_plannings(medical_list, history_plannings):
     medical_list['Statut'] = medical_list['Statut'].apply(lambda x: 'CC' if 'ADVISOR' in str(x).upper() or 'CUSTOMER SERVICE' in str(x).upper() or 'CC' in str(x).upper() else 'ENC')
     return medical_list
 
+# ★★★ MODIFIÉ : lecture unique via xls.parse (évite double lecture du fichier)
 def parse_planning(files_data: list):
     all_planning = []
     for filename, content in files_data:
@@ -241,27 +256,27 @@ def parse_planning(files_data: list):
         except: continue
         df = None
         if "Tout (WFO+WFH)" in xls.sheet_names:
-            df = pd.read_excel(io.BytesIO(content), sheet_name="Tout (WFO+WFH)", header=None, skiprows=3, engine=engine)
+            df = xls.parse(sheet_name="Tout (WFO+WFH)", header=None, skiprows=3)
             cols = [3, 4, 5, 6, 7, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21, 23, 24, 25, 27, 28, 29, 31, 32, 33, 35, 36, 37]
             new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
             df = df.iloc[:, cols]; df.columns = new_cols
         elif "TMM" in xls.sheet_names:
-            df_head = pd.read_excel(io.BytesIO(content), sheet_name="TMM", header=None, nrows=10, engine=engine)
+            df_head = xls.parse(sheet_name="TMM", header=None, nrows=10)
             header_row_idx = None; trans_col_idx = 0
             for i in range(len(df_head)):
                 row = df_head.iloc[i].astype(str).str.strip().tolist()
                 if "Transport" in row:
                     header_row_idx = i; trans_col_idx = row.index("Transport"); break
             if header_row_idx is not None:
-                df = pd.read_excel(io.BytesIO(content), sheet_name="TMM", header=None, skiprows=header_row_idx + 1, engine=engine)
+                df = xls.parse(sheet_name="TMM", header=None, skiprows=header_row_idx + 1)
                 offset = trans_col_idx
                 cols = [0 + offset, 4 + offset, 2 + offset, 5 + offset, 8 + offset, 10 + offset, 11 + offset, 12 + offset, 13 + offset, 17 + offset, 18 + offset, 19 + offset, 23 + offset, 24 + offset, 25 + offset, 29 + offset, 30 + offset, 31 + offset, 35 + offset, 36 + offset, 37 + offset, 41 + offset, 42 + offset, 43 + offset, 47 + offset, 48 + offset, 49 + offset]
                 new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
                 df = df.iloc[:, cols]; df.columns = new_cols
             else: continue
         else: continue
-        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
-        df['Paid ID'] = df['Paid ID'].astype(str).str.replace(" ", "").str.upper()
+        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r'\.0$', '', regex=True), errors='coerce').astype('Int64')
+        df['Paid ID'] = df['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
         df = df[df['WORKDAY ID'].notna()]
         df = df[~df['WORKDAY ID'].isin([0])]
         for j in jours: df[f'{j}_Flag'] = df[f'{j}_DE'].apply(lambda x: 1 if is_planned(x) else 0)
@@ -317,7 +332,7 @@ def parse_liste_visite(filename: str, content: bytes):
         else: df['Statut'] = 'ENC'
             
         df = df.rename(columns={id_col: 'WORKDAY ID'})
-        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
+        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r'\.0$', '', regex=True), errors='coerce').astype('Int64')
         
         if nom_col: df = df.rename(columns={nom_col: 'Nom'})
         if 'Nom' not in df.columns: df['Nom'] = ''
@@ -336,38 +351,13 @@ def parse_liste_visite(filename: str, content: bytes):
         print("ERREUR parse_liste_visite:", traceback.format_exc())
         return None
 
-def parse_generated_legacy(filename: str, content: bytes):
-    """Parse un fichier export de l'ancien outil contenant les planifications."""
-    try:
-        engine = get_excel_engine(filename)
-        df = pd.read_excel(io.BytesIO(content), engine=engine)
-        df.columns = [str(c).strip() for c in df.columns]
-        df = df.rename(columns={'Priorité': 'Priorité Visite', 'Priorite': 'Priorité Visite'})
-        if 'WORKDAY ID' in df.columns:
-            df['WORKDAY ID'] = pd.to_numeric(
-                df['WORKDAY ID'].astype(str).str.replace(' ', '').str.replace('.0', ''),
-                errors='coerce').astype('Int64')
-        else:
-            return None
-        for col in ['Date Visite', 'Date d\'embauche', 'Créneau Visite', 'Shift Début', 'Shift Fin']:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col].astype(str), errors='coerce', dayfirst=True)
-        for col in ['Statut Visite', 'Nom', 'Prénom', 'Projet', 'Statut']:
-            if col not in df.columns:
-                df[col] = ''
-        if 'Priorité Visite' not in df.columns:
-            df['Priorité Visite'] = ''
-        return df
-    except Exception as e:
-        print("ERREUR parse_generated_legacy:", traceback.format_exc())
-        return None
-        
+# ★★★ MODIFIÉ : lecture unique via xls.parse
 def parse_rta_file(filename: str, content: bytes):
     engine = get_excel_engine(filename)
     xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
     sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
     if not sheet_name: return None
-    df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_name, engine=engine)
+    df = xls.parse(sheet_name=sheet_name)
     df = df.loc[:, ~df.columns.duplicated()]
     cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
     df.columns = cols_cleaned
@@ -376,7 +366,7 @@ def parse_rta_file(filename: str, content: bytes):
     df = df.rename(columns=current_renames)
     df = df.loc[:, ~df.columns.duplicated()]
     df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
-    df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
+    df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r'\.0$', '', regex=True), errors='coerce').astype('Int64')
     if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
     if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
     if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
@@ -384,6 +374,104 @@ def parse_rta_file(filename: str, content: bytes):
     df['Statut Visite'] = df['Statut Visite'].astype(str)
     df['Commentaire'] = df['Commentaire'].astype(str)
     return df
+
+# ★★★ NOUVEAU : parser le fichier de planning généré exporté de l'ancien outil
+def parse_generated_legacy(filename: str, content: bytes):
+    """Parse le fichier excel exporté de l'ancien outil contenant les collaborateurs et leurs planifications."""
+    try:
+        engine = get_excel_engine(filename)
+        xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+        sheet_name = xls.sheet_names[0] if xls.sheet_names else None
+        if not sheet_name: return None
+        df = xls.parse(sheet_name=sheet_name)
+        df = df.loc[:, ~df.columns.duplicated()]
+        df.columns = [str(c).strip() for c in df.columns]
+
+        renames = {}
+        for c in df.columns:
+            cu = str(c).upper().strip()
+            if 'WORKDAY' in cu or 'MATRICULE' in cu:
+                renames[c] = 'WORKDAY ID'
+            elif 'STATUT' in cu and 'VISITE' in cu:
+                renames[c] = 'Statut Visite'
+            elif 'DATE' in cu and 'VISITE' in cu:
+                renames[c] = 'Date Visite'
+            elif 'CRENEAU' in cu or 'CRÉNEAU' in cu or 'CRENEAU' in cu:
+                renames[c] = 'Créneau Visite'
+            elif 'SHIFT' in cu and ('DEBUT' in cu or 'DÉBUT' in cu or 'START' in cu):
+                renames[c] = 'Shift Début'
+            elif 'SHIFT' in cu and 'FIN' in cu:
+                renames[c] = 'Shift Fin'
+            elif cu == 'NOM':
+                renames[c] = 'Nom'
+            elif cu == 'PRENOM':
+                renames[c] = 'Prénom'
+            elif cu == 'PROJET':
+                renames[c] = 'Projet'
+            elif 'PRIORITE' in cu or 'PRIORITÉ' in cu:
+                renames[c] = 'Priorité Visite'
+            elif 'PAYROLL' in cu or 'PAID ID' in cu:
+                renames[c] = 'Payroll ID'
+            elif cu in ('STATUT', 'STATUT CC/ENC', 'CC/ENC'):
+                renames[c] = 'Statut'
+
+        df = df.rename(columns=renames)
+
+        if 'WORKDAY ID' not in df.columns:
+            return None
+
+        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r'\.0$', '', regex=True), errors='coerce').astype('Int64')
+        df = df[df['WORKDAY ID'].notna()].drop_duplicates(subset=['WORKDAY ID'])
+
+        if 'Date Visite' in df.columns:
+            df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
+        if 'Date d\'embauche' in df.columns:
+            df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
+        if 'Créneau Visite' in df.columns:
+            df['Créneau Visite'] = pd.to_datetime(df['Créneau Visite'], errors='coerce')
+        if 'Statut Visite' not in df.columns:
+            df['Statut Visite'] = 'Non Planifié'
+        return df
+    except Exception as e:
+        print("ERREUR parse_generated_legacy:", traceback.format_exc())
+        return None
+
+# ★★★ NOUVEAU : fusionner les données de l'ancien outil dans la liste médicale
+def import_generated_to_medical(df):
+    med_list = app_state.get('medical_list')
+
+    cols_needed = ['Statut Visite', 'Date Visite', 'Créneau Visite']
+    for col in cols_needed:
+        if col not in df.columns:
+            df[col] = pd.NaT if 'Date' in col or 'Créneau' in col else ''
+
+    if med_list is None or med_list.empty:
+        med_list = df.copy()
+    else:
+        med_list = med_list.copy()
+        for col in cols_needed:
+            if col not in med_list.columns:
+                med_list[col] = pd.NaT if ('Date' in col or 'Créneau' in col) else ''
+
+        lg = df.set_index('WORKDAY ID')
+        match_mask = med_list['WORKDAY ID'].isin(lg.index)
+
+        for col in ['Statut Visite', 'Date Visite', 'Créneau Visite', 'Nom', 'Prénom', 'Projet', 'Priorité Visite', 'Payroll ID']:
+            if col in df.columns:
+                mapping = lg[col].to_dict()
+                med_list.loc[match_mask, col] = med_list.loc[match_mask, 'WORKDAY ID'].map(mapping)
+
+        new_ids = df[~df['WORKDAY ID'].isin(med_list['WORKDAY ID'])]
+        if not new_ids.empty:
+            extra_cols = [c for c in new_ids.columns if c not in med_list.columns]
+            for c in extra_cols:
+                med_list[c] = ''
+            med_list = pd.concat([med_list, new_ids[med_list.columns.intersection(new_ids.columns)]], ignore_index=True)
+            # re-ordonner les colonnes du fichier ajouté
+            for c in med_list.columns:
+                if c not in new_ids.columns and c in ('Shift Début', 'Shift Fin'):
+                    med_list[c] = ''
+    return med_list
 
 @app.post("/api/import")
 async def import_files(files: List[UploadFile] = File(...), category: str = Form(...), week_name: str = Form(None)):
@@ -409,70 +497,41 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             save_history()
             display_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite']
             return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df[display_cols].head(50))}
-
-        elif category == 'legacy':
-            df = await asyncio.to_thread(parse_generated_legacy, files_data[0][0], files_data[0][1])
-            if df is None:
-                return {"message": "❌ Fichier illisible ou colonne 'WORKDAY ID' absente."}
-            df = df.drop_duplicates(subset=['WORKDAY ID'])
-
-            med_list = app_state.get('medical_list')
-            if med_list is None:
-                med_list = df.copy()
-            else:
-                med_list = med_list.copy()
-                lg = df.set_index('WORKDAY ID')
-                in_both = med_list['WORKDAY ID'].isin(lg.index)
-                for col in ['Statut Visite', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin']:
-                    if col in lg.columns:
-                        med_list.loc[in_both, col] = med_list.loc[in_both, 'WORKDAY ID'].map(lg[col])
-                add = df[~df['WORKDAY ID'].isin(med_list['WORKDAY ID'])].copy()
-                for col in set(med_list.columns) - set(add.columns):
-                    if col in ('Date Visite', 'Créneau Visite', 'Date d\'embauche'):
-                        add[col] = pd.NaT
-                    else:
-                        add[col] = ''
-                med_list = pd.concat([med_list, add], ignore_index=True)
-
-            for col, default in [('Statut Visite', 'Non Planifié'), ('Date Visite', pd.NaT), ('Créneau Visite', pd.NaT)]:
-                if col not in med_list.columns:
-                    med_list[col] = default
-            if 'Date d\'embauche' in med_list.columns:
-                if 'Ancienneté' not in med_list.columns:
-                    med_list['Ancienneté'] = med_list['Date d\'embauche'].apply(calculate_anciennete)
-                if 'Ancienneté_num' not in med_list.columns:
-                    med_list['Ancienneté_num'] = med_list['Date d\'embauche'].apply(calculate_anciennete_num)
-
-            app_state['medical_list'] = med_list
-            save_history()
-            n_planned = int((med_list['Statut Visite'] == 'Planifié').sum())
-            return {"message": f"✅ Reprise ancien outil : {n_planned} personnes planifiées actives."}
-                    
+            
         elif category == 'suivi':
             df = await asyncio.to_thread(parse_rta_file, files_data[0][0], files_data[0][1])
             if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
             
-            # ★★★ MODIFIÉ : Bloc de calcul des non-effectuées SUPPRIMÉ ici.
-            # La liste est désormais calculée dynamiquement dans /api/non_effectuees.
-            
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
-                for _, rta_row in df.iterrows():
-                    wid = rta_row.get('WORKDAY ID')
-                    if pd.notna(wid) and wid in med_list['WORKDAY ID'].values:
-                        com = str(rta_row.get('Commentaire', '')).lower()
-                        statut_rta = str(rta_row.get('Statut Visite', '')).lower()
-                        if 'ok' in com: med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Visite Faite'
-                        elif 'absent' in com or 'report' in com or 'absent' in statut_rta or 'report' in statut_rta:
-                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Absent/Reporté'
-                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.NaT
-                            med_list.loc[med_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.NaT
+                # ★★★ MODIFIÉ : vectorisé (au lieu d'iterrows) pour de bien meilleures performances
+                com_lower = df['Commentaire'].astype(str).str.lower()
+                statut_lower = df['Statut Visite'].astype(str).str.lower()
+                ok_wids = set(df.loc[com_lower.str.contains('ok', na=False), 'WORKDAY ID'].dropna())
+                abs_mask = com_lower.str.contains('absent|report', na=False) | statut_lower.str.contains('absent|report', na=False)
+                abs_wids = set(df.loc[abs_mask, 'WORKDAY ID'].dropna())
+
+                med_list.loc[med_list['WORKDAY ID'].isin(ok_wids), 'Statut Visite'] = 'Visite Faite'
+                med_list.loc[med_list['WORKDAY ID'].isin(abs_wids), 'Statut Visite'] = 'Absent/Reporté'
+                med_list.loc[med_list['WORKDAY ID'].isin(abs_wids), 'Date Visite'] = pd.NaT
+                med_list.loc[med_list['WORKDAY ID'].isin(abs_wids), 'Créneau Visite'] = pd.NaT
                 app_state['medical_list'] = med_list
 
             app_state['rta_data'] = df
             save_history()
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
-            
+
+        # ★★★ NOUVEAU : import du fichier de planning généré exporté de l'ancien outil
+        elif category == 'generated_planning':
+            df = await asyncio.to_thread(parse_generated_legacy, files_data[0][0], files_data[0][1])
+            if df is None:
+                return {"message": "❌ Fichier illisible ou colonne WORKDAY ID absente."}
+            med_list = import_generated_to_medical(df)
+            app_state['medical_list'] = med_list
+            save_history()
+            n_planned = int((med_list['Statut Visite'].astype(str).str.strip() == 'Planifié').sum())
+            return {"message": f"✅ Planning ancien outil importé: {len(df)} lignes, {n_planned} personnes planifiées actives."}
+
     except Exception as e:
         print("ERREUR BACKEND:", traceback.format_exc())
         return {"message": f"❌ Erreur Python: {str(e)}"}
@@ -506,7 +565,6 @@ async def get_planning(week_name: str):
 
 @app.delete("/api/delete/{category}")
 async def delete_data(category: str):
-    # ★★★ MODIFIÉ : message informatif pour non_effectuees (liste calculée dynamiquement)
     if category == 'planning': app_state['plannings'] = {}
     elif category == 'collab': app_state['medical_list'] = None
     elif category == 'suivi': app_state['rta_data'] = None
@@ -529,11 +587,13 @@ async def get_weeks():
 async def get_generated():
     med_list = app_state.get('medical_list')
     if med_list is None: return {"data": []}
+    if 'Date Visite' not in med_list.columns: return {"data": []}
     mask = med_list['Date Visite'].notna()
     planned = med_list[mask].copy()
     planned['Date Visite'] = planned['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
     planned['Créneau Visite'] = pd.to_datetime(planned['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
-    return {"data": clean_for_json(planned[['WORKDAY ID', 'Nom', 'Projet', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Priorité Visite']])}
+    out_cols = [c for c in ['WORKDAY ID', 'Nom', 'Projet', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Priorité Visite'] if c in planned.columns]
+    return {"data": clean_for_json(planned[out_cols])}
 
 @app.post("/api/unplan")
 async def unplan_all():
@@ -672,9 +732,6 @@ async def generate_planning(config: str = Form(...)):
 
 @app.get("/api/non_effectuees")
 async def get_non_effectuees():
-    # ★★★ MODIFIÉ : calcul dynamique à chaque consultation.
-    # Règle : Statut = 'Planifié' + Date Visite STRICTEMENT ANTÉRIEURE à aujourd'hui
-    #        + Commentaire différent de 'OK'.
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty: return {"data": []}
 
@@ -718,34 +775,28 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if rta_data is None or rta_data.empty:
         return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
         
-    # 1. Préparation du DataFrame complet (AVANT filtre)
     med_df_full = rta_data.copy()
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
         if col not in med_df_full.columns:
             med_df_full[col] = ''
             
-    # Calculer le Total à passer AVANT le filtre de date
     total_a_passer = len(med_df_full)
     
-    # Convertir Date Visite
     if 'Date Visite' in med_df_full.columns and not pd.api.types.is_datetime64_any_dtype(med_df_full['Date Visite']):
         med_df_full['Date Visite'] = pd.to_datetime(med_df_full['Date Visite'], errors='coerce')
     elif 'Date Visite' not in med_df_full.columns:
         med_df_full['Date Visite'] = pd.NaT
     
-    # Mapping des projets pour le DataFrame complet (CRUCIAL POUR ÉVITER L'ERREUR)
     if 'Projet_Affichage' not in med_df_full.columns:
         if 'Projet' in med_df_full.columns: med_df_full['Projet_Affichage'] = med_df_full['Projet'].apply(get_mapped_project)
         else: med_df_full['Projet_Affichage'] = 'N/A'
         
-    # 2. Application du filtre de date
     med_df = med_df_full.copy()
     if start_date:
         med_df = med_df[med_df['Date Visite'] >= pd.to_datetime(start_date)]
     if end_date:
         med_df = med_df[med_df['Date Visite'] <= pd.to_datetime(end_date)]
         
-    # 3. Si le filtre vide le DataFrame, on renvoie le Total à passer et des 0 ailleurs
     if med_df.empty and total_a_passer > 0:
         return {
             "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0.0%"}, 
@@ -753,7 +804,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
         
-    # Calcul de la durée (sur med_df)
     if 'Durée (min)' not in med_df.columns or med_df['Durée (min)'].isnull().all():
         if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
             if not pd.api.types.is_datetime64_any_dtype(med_df['Heure Départ']):
@@ -765,7 +815,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         else:
             med_df['Durée (min)'] = np.nan
         
-    # --- CALCULS ---
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
     is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié')
     
@@ -784,7 +833,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     chart1_data = []
     chart2_data = []
     if not med_df_full.empty:
-        # Chart 1 by Project : Total (sur full) vs Effectuée (sur filtré)
         counts_full = med_df_full.groupby(['Projet_Affichage']).size().reset_index(name='Total')
         counts_eff = med_df.groupby(['Projet_Affichage']).agg(
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum())
@@ -799,7 +847,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
             
-        # Chart 2 by Date (sur filtré)
         date_df = med_df[med_df['Date Visite'].notna()].copy()
         date_df['DateDT'] = date_df['Date Visite']
         chart2_df = date_df.groupby('DateDT').agg(
@@ -816,7 +863,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
     
-    # Avg duration (sur filtré)
     med_df['Date'] = med_df['Date Visite'].dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
@@ -825,7 +871,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
         
-    # Top 5 (sur filtré)
     top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top5 = []
     if not top5_df.empty:
@@ -835,7 +880,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
         top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
         
-    # Done visites (sur filtré)
     done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     done_visites = []
     if not done_df.empty:
