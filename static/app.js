@@ -391,23 +391,34 @@ async function loadDashboard() {
             // Chart 1
             const c1 = result.charts.chart1 || [];
             
-            // --- FILTRE PAR PROJET ---
+            // --- FILTRE PAR PROJET (MULTI-SÉLECTION) ---
             const projFilter = document.getElementById('p7_proj_filter');
-            const selectedProj = projFilter.value; // Mémoriser le choix actuel
+            // Récupérer la liste des projets sélectionnés
+            const selectedProjs = Array.from(projFilter.selectedOptions).map(opt => opt.value);
             
             // Remplir le menu déroulant avec la liste des projets
             const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
-            projFilter.innerHTML = '<option value="">Tous les projets</option>';
+            // On ajoute l'option "Tous" au début si elle n'y est pas (utile au premier chargement)
+            if (!projFilter.options.length || projFilter.options[0].value !== "") {
+                projFilter.innerHTML = '<option value="">Tous les projets</option>';
+            }
             uniqueProjects.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p;
-                opt.innerText = p;
-                if (p === selectedProj) opt.selected = true; // Garder le projet sélectionné
-                projFilter.appendChild(opt);
+                // Ne pas ajouter de doublons dans la liste
+                if (!Array.from(projFilter.options).some(opt => opt.value === p)) {
+                    const opt = document.createElement('option');
+                    opt.value = p;
+                    opt.innerText = p;
+                    projFilter.appendChild(opt);
+                }
             });
             
-            // Filtrer les données si un projet est choisi
-            const filteredC1 = selectedProj ? c1.filter(d => d.project === selectedProj) : c1;
+            // Filtrer les données : si la liste est vide ou contient "", on prend tout
+            let filteredC1;
+            if (selectedProjs.length === 0 || selectedProjs.includes("")) {
+                filteredC1 = c1;
+            } else {
+                filteredC1 = c1.filter(d => selectedProjs.includes(d.project));
+            }
             
             if (filteredC1.length > 0) {
                 const max1 = Math.max(...filteredC1.map(d => d.total));
@@ -417,7 +428,7 @@ async function loadDashboard() {
                 const layout1 = { ...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max1 * 1.15] } };
                 Plotly.newPlot(chart1Div, [t1, t3], layout1);
             } else { 
-                chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; 
+                chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>'; 
             }
             
             // Chart 2
