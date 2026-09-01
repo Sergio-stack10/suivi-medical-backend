@@ -22,6 +22,11 @@ window.addEventListener('DOMContentLoaded', () => {
         const user = localStorage.getItem('username') || 'Admin';
         document.getElementById('userInfo').innerText = user;
         document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
+        // Initialiser la page 1 au démarrage
+        const activeTab = document.querySelector('.top-tab.active');
+        if (activeTab) {
+            switchPage('p1', activeTab);
+        }
     }
 });
 
@@ -35,6 +40,11 @@ function handleLogin() {
         document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
         localStorage.setItem('isLoggedIn', 'true');
         localStorage.setItem('username', user);
+        // Initialiser la page 1 après connexion
+        const activeTab = document.querySelector('.top-tab.active');
+        if (activeTab) {
+            switchPage('p1', activeTab);
+        }
     } else {
         document.getElementById('authError').style.display = 'block';
     }
@@ -74,7 +84,7 @@ function switchPage(pageId, element) {
 }
 
 // ==========================================
-// DATA MANAGEMENT (Modal, Delete, Export)
+// DATA MANAGEMENT
 // ==========================================
 function showDeleteModal(category) {
     deleteTarget = category;
