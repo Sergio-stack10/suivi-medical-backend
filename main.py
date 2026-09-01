@@ -590,7 +590,7 @@ async def get_absences():
     return {"data": clean_for_json(abs_df)}
 
 @app.get("/api/dashboard")
-async def get_dashboard():
+async def get_dashboard(start_date: str = None, end_date: str = None):
     # Base EXCLUSIVE sur le fichier RTA (Page 5)
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
@@ -603,6 +603,18 @@ async def get_dashboard():
         if col not in med_df.columns:
             med_df[col] = ''
             
+    # Convertir Date Visite en datetime pour le filtre
+    med_df['Date Visite'] = pd.to_datetime(med_df['Date Visite'], errors='coerce')
+    
+    # Appliquer le filtre de date
+    if start_date:
+        med_df = med_df[med_df['Date Visite'] >= pd.to_datetime(start_date)]
+    if end_date:
+        med_df = med_df[med_df['Date Visite'] <= pd.to_datetime(end_date)]
+        
+    if med_df.empty:
+        return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
+        
     # Calcul de la durée
     if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
         med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
@@ -624,14 +636,12 @@ async def get_dashboard():
     
     is_fait = com_lower.str.contains('ok', na=False)
     is_abs = com_lower.str.contains('absent|report', na=False)
-    is_planifie = (statut_lower == 'planifié')
+    is_planifie = (statut_lower == 'planifié') & ~is_fait & ~is_abs
     
-    total_a_passer = len(med_df) # Total des lignes du fichier RTA
+    total_a_passer = len(med_df) # Total des lignes du fichier RTA filtré
     total_fait = len(med_df[is_fait])
     total_absent = len(med_df[is_abs])
     total_planifie = len(med_df[is_planifie])
-    
-    # Le reste à planifier correspond à ceux qui ne sont ni fait, ni absent, ni planifié
     reste_a_planifier = len(med_df[~is_fait & ~is_abs & ~is_planifie])
     
     metrics = {
@@ -642,7 +652,7 @@ async def get_dashboard():
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
     
-    # Status for charts (Mutuellement exclusif pour que le total fasse 100%)
+    # Status for charts (Mutuellement exclusif)
     med_df['Status_Calc'] = 'Reste à planifier'
     med_df.loc[is_planifie, 'Status_Calc'] = 'Planifié'
     med_df.loc[is_abs, 'Status_Calc'] = 'Absent'
@@ -666,8 +676,8 @@ async def get_dashboard():
             })
             
         # Chart 2 by Date
-        date_df = med_df[pd.to_datetime(med_df['Date Visite'], errors='coerce').notna()].copy()
-        date_df['Date Sort'] = pd.to_datetime(date_df['Date Visite'])
+        date_df = med_df[med_df['Date Visite'].notna()].copy()
+        date_df['Date Sort'] = date_df['Date Visite']
         date_df = date_df.sort_values('Date Sort')
         date_df['Date Visite Str'] = date_df['Date Sort'].dt.strftime('%d/%m/%Y')
         
@@ -685,7 +695,7 @@ async def get_dashboard():
     chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
     
     # Avg duration
-    med_df['Date'] = pd.to_datetime(med_df['Date Visite'], errors='coerce').dt.date
+    med_df['Date'] = med_df['Date Visite'].dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
     if not avg_df.empty:
