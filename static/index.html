@@ -43,8 +43,7 @@
     <div id="appContainer">
         <div class="top-nav">
             <button class="menu-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-            <div class="nav-tabs">
-                <button class="top-tab active" onclick="switchPage('p1', this)"><i class="fas fa-file-excel"></i> Planning</button>
+                <button class="top-tab" onclick="switchPage('p6', this)"><i class="fas fa-user-slash"></i> Non-effectuées</button>                <button class="top-tab active" onclick="switchPage('p1', this)"><i class="fas fa-file-excel"></i> Planning</button>
                 <button class="top-tab" onclick="switchPage('p2', this)"><i class="fas fa-users"></i> Collaborateurs</button>
                 <button class="top-tab" onclick="switchPage('p3', this)"><i class="fas fa-calendar-plus"></i> Génération</button>
                 <button class="top-tab" onclick="switchPage('p4', this)"><i class="fas fa-list-check"></i> Planning généré</button>
@@ -192,11 +191,11 @@
 
                 <!-- Page 6 -->
                 <div id="page-p6" class="page-content">
-                    <div class="page-header"><h1>Absences</h1></div>
+                    <div class="page-header"><h1>Suivi des Non-effectuées</h1></div>
                     <div class="action-bar">
-                        <button class="btn-icon" onclick="loadAbsences()"><i class="fas fa-sync"></i> Actualiser</button>
-                        <button class="btn-icon export" onclick="exportData('absences')"><i class="fas fa-file-excel"></i> Exporter</button>
-                        <button class="btn-icon danger" onclick="showDeleteModal('absences')"><i class="fas fa-trash"></i> Supprimer</button>
+                        <button class="btn-icon" onclick="loadNonEffectuees()"><i class="fas fa-sync"></i> Actualiser</button>
+                        <button class="btn-icon export" onclick="exportData('non_effectuees')"><i class="fas fa-file-excel"></i> Exporter</button>
+                        <button class="btn-icon danger" onclick="showDeleteModal('non_effectuees')"><i class="fas fa-trash"></i> Supprimer tout</button>
                     </div>
                     <div class="card">
                         <div class="table-container">
