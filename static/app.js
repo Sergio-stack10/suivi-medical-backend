@@ -390,15 +390,36 @@ async function loadDashboard() {
             
             // Chart 1
             const c1 = result.charts.chart1 || [];
-            if (c1.length > 0) {
-                const max1 = Math.max(...c1.map(d => d.total));
-                const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '0' };
+            
+            // --- FILTRE PAR PROJET ---
+            const projFilter = document.getElementById('p7_proj_filter');
+            const selectedProj = projFilter.value; // Mémoriser le choix actuel
+            
+            // Remplir le menu déroulant avec la liste des projets
+            const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
+            projFilter.innerHTML = '<option value="">Tous les projets</option>';
+            uniqueProjects.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p;
+                opt.innerText = p;
+                if (p === selectedProj) opt.selected = true; // Garder le projet sélectionné
+                projFilter.appendChild(opt);
+            });
+            
+            // Filtrer les données si un projet est choisi
+            const filteredC1 = selectedProj ? c1.filter(d => d.project === selectedProj) : c1;
+            
+            if (filteredC1.length > 0) {
+                const max1 = Math.max(...filteredC1.map(d => d.total));
+                const t1 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
+                const t3 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: filteredC1.map(d=>d.faite), textposition: 'inside', offsetgroup: '0' };
                 
                 const layout1 = { ...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max1 * 1.15] } };
                 Plotly.newPlot(chart1Div, [t1, t3], layout1);
-            } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-
+            } else { 
+                chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; 
+            }
+            
             // Chart 2
             const c2 = result.charts.chart2 || [];
             if (c2.length > 0) {
