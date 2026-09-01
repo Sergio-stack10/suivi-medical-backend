@@ -618,19 +618,21 @@ async def get_dashboard():
     else:
         med_df['Projet_Affichage'] = 'N/A'
         
-    # --- CALCULS STRICTS BASÉS UNIQUEMENT SUR LE FICHIER RTA ---
+    # --- CALCULS STRICTS SELON LES RÈGLES EXACTES ---
     com_lower = med_df['Commentaire'].astype(str).str.lower()
     statut_lower = med_df['Statut Visite'].astype(str).str.strip().str.lower()
     
     is_fait = com_lower.str.contains('ok', na=False)
     is_abs = com_lower.str.contains('absent|report', na=False)
-    is_planifie = (statut_lower == 'planifié') & ~is_fait & ~is_abs
-    is_non_planifie = (statut_lower == 'non planifié')
+    is_planifie = (statut_lower == 'planifié')
     
-    total_a_passer = len(med_df) # Total du fichier RTA
+    total_a_passer = len(med_df) # Total des lignes du fichier RTA
     total_fait = len(med_df[is_fait])
+    total_absent = len(med_df[is_abs])
     total_planifie = len(med_df[is_planifie])
-    reste_a_planifier = len(med_df[is_non_planifie])
+    
+    # Le reste à planifier correspond à ceux qui ne sont ni fait, ni absent, ni planifié
+    reste_a_planifier = len(med_df[~is_fait & ~is_abs & ~is_planifie])
     
     metrics = {
         "total_a_passer": total_a_passer, 
@@ -640,20 +642,20 @@ async def get_dashboard():
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
     
-    # Status for charts
-    med_df['Status_Calc'] = 'Autre'
-    med_df.loc[is_fait, 'Status_Calc'] = 'Visite effectuée'
-    med_df.loc[is_abs, 'Status_Calc'] = 'Absent'
+    # Status for charts (Mutuellement exclusif pour que le total fasse 100%)
+    med_df['Status_Calc'] = 'Reste à planifier'
     med_df.loc[is_planifie, 'Status_Calc'] = 'Planifié'
+    med_df.loc[is_abs, 'Status_Calc'] = 'Absent'
+    med_df.loc[is_fait, 'Status_Calc'] = 'Visite effectuée'
     
     chart1_data = []
     chart2_data = []
     if not med_df.empty:
         # Chart 1 by Project
         counts_df = med_df.groupby(['Projet_Affichage', 'Status_Calc']).size().unstack(fill_value=0).reset_index()
-        for col in ['Planifié', 'Visite effectuée', 'Absent', 'Autre']:
+        for col in ['Planifié', 'Visite effectuée', 'Absent', 'Reste à planifier']:
             if col not in counts_df: counts_df[col] = 0
-        counts_df['Total'] = counts_df['Planifié'] + counts_df['Visite effectuée'] + counts_df['Absent'] + counts_df['Autre']
+        counts_df['Total'] = counts_df['Planifié'] + counts_df['Visite effectuée'] + counts_df['Absent'] + counts_df['Reste à planifier']
         counts_df = counts_df.sort_values('Total', ascending=False)
         for _, row in counts_df.iterrows():
             chart1_data.append({
@@ -663,7 +665,7 @@ async def get_dashboard():
                 "faite": int(row['Visite effectuée'])
             })
             
-        # Chart 2 by Date (convertir en date vraie pour trier chronologiquement)
+        # Chart 2 by Date
         date_df = med_df[pd.to_datetime(med_df['Date Visite'], errors='coerce').notna()].copy()
         date_df['Date Sort'] = pd.to_datetime(date_df['Date Visite'])
         date_df = date_df.sort_values('Date Sort')
