@@ -376,6 +376,12 @@ def parse_rta_file(filename: str, content: bytes):
     cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
     df.columns = cols_cleaned
     rename_map = {'WORKDAY ID': 'WORKDAY ID', 'NOM': 'Nom', 'PRENOM': 'Prénom', 'STATUT VISITE': 'Statut Visite', 'DATE VISITE': 'Date Visite', 'HEURE DEPART': 'Heure Départ', 'HEURE RETOUR': 'Heure Retour', 'COMMENTAIRES': 'Commentaire', 'DUREE': 'Durée', 'PROJET': 'Projet'}
+    # ★ NOUVEAU : détection de la colonne « Nombre d'appels » (plusieurs variantes possibles)
+    for c in df.columns:
+        cu = str(c).upper()
+        if 'APPEL' in cu or 'CALL' in cu or 'TENTAT' in cu:
+            rename_map[c] = "Nombre d'appels"
+            break
     current_renames = {k: v for k, v in rename_map.items() if k in df.columns}
     df = df.rename(columns=current_renames)
     df = df.loc[:, ~df.columns.duplicated()]
@@ -387,6 +393,9 @@ def parse_rta_file(filename: str, content: bytes):
     if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
     df['Statut Visite'] = df['Statut Visite'].astype(str)
     df['Commentaire'] = df['Commentaire'].astype(str)
+    # ★ NOUVEAU : convertir « Nombre d'appels » en nombre
+    if "Nombre d'appels" in df.columns:
+        df["Nombre d'appels"] = pd.to_numeric(df["Nombre d'appels"], errors='coerce').fillna(0).astype('Int64')
     return df
 
 # ★★★ NOUVEAU : parser le fichier de planning généré exporté de l'ancien outil
@@ -900,12 +909,17 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
         top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
         
+    # Done visites (sur filtré)
     done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     done_visites = []
     if not done_df.empty:
         done_df['Nom complet'] = done_df['Nom'].fillna('').astype(str) + ' ' + done_df['Prénom'].fillna('').astype(str)
         done_df['Statut visite'] = 'Done'
-        done_visites = clean_for_json(done_df[['WORKDAY ID', 'Nom complet', 'Projet_Affichage', 'Statut visite']])
+        # ★ NOUVEAU : ajouter « Nombre d'appels » au tableau si la colonne existe
+        cols = ['WORKDAY ID', 'Nom complet', 'Projet_Affichage', 'Statut visite']
+        if "Nombre d'appels" in done_df.columns:
+            cols.append("Nombre d'appels")
+        done_visites = clean_for_json(done_df[cols])
         
     return {
         "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, 
