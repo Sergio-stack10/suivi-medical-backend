@@ -596,27 +596,42 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if rta_data is None or rta_data.empty:
         return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
         
-    med_df = rta_data.copy()
+    med_df_full = rta_data.copy()
     
     # S'assurer que les colonnes existent
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
-        if col not in med_df.columns:
-            med_df[col] = ''
+        if col not in med_df_full.columns:
+            med_df_full[col] = ''
             
-    # Optimisation : Convertir en datetime SEULEMENT si ce n'est pas déjà fait
-    if 'Date Visite' in med_df.columns and not pd.api.types.is_datetime64_any_dtype(med_df['Date Visite']):
-        med_df['Date Visite'] = pd.to_datetime(med_df['Date Visite'], errors='coerce')
-    elif 'Date Visite' not in med_df.columns:
-        med_df['Date Visite'] = pd.NaT
+    # Calculer le Total à passer AVANT le filtre de date
+    total_a_passer = len(med_df_full)
     
-    # Appliquer le filtre de date
+    # Optimisation : Convertir en datetime SEULEMENT si ce n'est pas déjà fait
+    if 'Date Visite' in med_df_full.columns and not pd.api.types.is_datetime64_any_dtype(med_df_full['Date Visite']):
+        med_df_full['Date Visite'] = pd.to_datetime(med_df_full['Date Visite'], errors='coerce')
+    elif 'Date Visite' not in med_df_full.columns:
+        med_df_full['Date Visite'] = pd.NaT
+    
+    # Appliquer le filtre de date pour les autres métriques et graphiques
+    med_df = med_df_full.copy()
     if start_date:
         med_df = med_df[med_df['Date Visite'] >= pd.to_datetime(start_date)]
     if end_date:
         med_df = med_df[med_df['Date Visite'] <= pd.to_datetime(end_date)]
         
-    if med_df.empty:
-        return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
+    if med_df.empty and not med_df_full.empty:
+        # Si le filtre retourne vide, on renvoie quand même le total à passer
+        return {
+            "metrics": {
+                "total_a_passer": total_a_passer, 
+                "total_planifie": 0, 
+                "total_fait": 0, 
+                "reste_a_planifier": total_a_passer,
+                "pct_fait": "0.0%"
+            }, 
+            "avg_duration": [], "top5": [], "done_visites": [], 
+            "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
+        }
         
     # Calcul de la durée
     if 'Durée (min)' not in med_df.columns or med_df['Durée (min)'].isnull().all():
@@ -640,14 +655,15 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     # --- NOUVELLE RÈGLE DE CALCUL ---
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
     is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié')
-    # Absent = Tout ce qui est Planifié mais qui n'est pas OK
-    is_abs = is_planifie & ~is_fait
+    # Non effectuée = Tout ce qui est Planifié mais qui n'est pas OK
+    is_non_eff = is_planifie & ~is_fait
     
-    total_a_passer = len(med_df) 
     total_fait = len(med_df[is_fait])
-    total_absent = len(med_df[is_abs])
+    total_non_eff = len(med_df[is_non_eff])
     total_planifie = len(med_df[is_planifie])
-    reste_a_planifier = len(med_df[~is_fait & ~is_planifie])
+    # Le reste à planifier correspond à ceux qui ne sont ni fait, ni planifié (sur l'ensemble du fichier)
+    reste_a_planifier = total_a_passer - total_fait - total_planifie
+    if reste_a_planifier < 0: reste_a_planifier = 0 # Sécurité
     
     metrics = {
         "total_a_passer": total_a_passer, 
@@ -665,7 +681,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             Total=('WORKDAY ID', 'count'),
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~med_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
+            NonEff=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~med_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
         ).reset_index().sort_values('Total', ascending=False)
         
         for _, row in counts_df.iterrows():
@@ -673,28 +689,25 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "project": str(row['Projet_Affichage']), 
                 "total": int(row['Total']), 
                 "planifie": int(row['Planifie']), 
-                "faite": int(row['Effectuee'])
+                "faite": int(row['Effectuee']),
+                "absent": int(row['NonEff']) # On garde la clé 'absent' pour le JS mais ça contient les non effectuées
             })
             
         # Chart 2 by Date
-        # 1. Exclure les dates vides (NaT)
         date_df = med_df[med_df['Date Visite'].notna()].copy()
-        
-        # 2. Grouper par l'objet Datetime pour assurer un tri chronologique réel
         date_df['DateDT'] = date_df['Date Visite']
         chart2_df = date_df.groupby('DateDT').agg(
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~date_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
-        ).reset_index().sort_values('DateDT') # Tri chronologique
+            NonEff=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~date_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
+        ).reset_index().sort_values('DateDT')
         
-        # 3. Formater en texte APRES le tri
         for _, row in chart2_df.iterrows():
             chart2_data.append({
                 "date": row['DateDT'].strftime('%d/%m/%Y'), 
                 "planifie": int(row['Planifie']), 
                 "faite": int(row['Effectuee']),
-                "absent": int(row['Absent'])
+                "absent": int(row['NonEff'])
             })
 
     chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
