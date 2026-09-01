@@ -681,32 +681,36 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     
     chart1_data = []
     chart2_data = []
-    if not med_df.empty:
-        counts_df = med_df.groupby(['Projet_Affichage']).agg(
-            Total=('WORKDAY ID', 'count'),
-            Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
-            Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~med_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
-        ).reset_index().sort_values('Total', ascending=False)
+    if not med_df_full.empty:
+        # Chart 1 by Project
+        # Total est calculé sur TOUT le fichier (med_df_full), Effectuée sur le filtré (med_df)
+        counts_full = med_df_full.groupby(['Projet_Affichage']).size().reset_index(name='Total')
+        counts_eff = med_df.groupby(['Projet_Affichage']).agg(
+            Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum())
+        ).reset_index()
         
-        for _, row in counts_df.iterrows():
+        chart1_df = pd.merge(counts_full, counts_eff, on='Projet_Affichage', how='left').fillna(0).sort_values('Total', ascending=False)
+        
+        for _, row in chart1_df.iterrows():
             chart1_data.append({
-                "project": str(row['Projet_Affichage']), "total": int(row['Total']), 
-                "planifie": int(row['Planifie']), "faite": int(row['Effectuee']), "absent": int(row['Absent'])
+                "project": str(row['Projet_Affichage']), 
+                "total": int(row['Total']), 
+                "faite": int(row['Effectuee'])
             })
             
+        # Chart 2 by Date (Uniquement sur les dates non vides, triées chronologiquement)
         date_df = med_df[med_df['Date Visite'].notna()].copy()
         date_df['DateDT'] = date_df['Date Visite']
         chart2_df = date_df.groupby('DateDT').agg(
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
-            Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~date_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
+            Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum())
         ).reset_index().sort_values('DateDT')
         
         for _, row in chart2_df.iterrows():
             chart2_data.append({
-                "date": row['DateDT'].strftime('%d/%m/%Y'), "planifie": int(row['Planifie']), 
-                "faite": int(row['Effectuee']), "absent": int(row['Absent'])
+                "date": row['DateDT'].strftime('%d/%m/%Y'), 
+                "planifie": int(row['Planifie']), 
+                "faite": int(row['Effectuee'])
             })
 
     chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
