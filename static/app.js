@@ -393,11 +393,10 @@ async function loadDashboard() {
             if (c1.length > 0) {
                 const max1 = Math.max(...c1.map(d => d.total));
                 const t1 = { x: c1.map(d=>d.project), y: c1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: c1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-                const t2 = { x: c1.map(d=>d.project), y: c1.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c1.map(d=>d.planifie), textposition: 'outside', offsetgroup: '1' };
-                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '1' };
+                const t3 = { x: c1.map(d=>d.project), y: c1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: c1.map(d=>d.faite), textposition: 'inside', offsetgroup: '0' }; // Même offsetgroup pour superposer
                 
                 const layout1 = { ...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max1 * 1.15] } };
-                Plotly.newPlot(chart1Div, [t1, t2, t3], layout1);
+                Plotly.newPlot(chart1Div, [t1, t3], layout1); // Planifié (t2) retiré
             } else { chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
             // Chart 2
@@ -408,11 +407,11 @@ async function loadDashboard() {
                 const date_order = c2.map(d=>d.date); 
                 
                 const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
-                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '1' };
-                const t3 = { x: c2.map(d=>d.date), y: c2.map(d=>d.absent), type: 'bar', name: 'Non effectuée', marker: { color: '#FBCA18' }, text: c2.map(d=>d.absent), textposition: 'outside', offsetgroup: '1', base: faite_arr };
+                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' }; // Même offsetgroup pour superposer
+                // Non effectuée (t3) retiré
                 
                 const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max2 * 1.15] } };
-                Plotly.newPlot(chart2Div, [t1, t2, t3], layout2);
+                Plotly.newPlot(chart2Div, [t1, t2], layout2); 
             } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
             // Chart 3
