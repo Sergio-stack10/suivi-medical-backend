@@ -54,8 +54,9 @@ def load_history():
         doc = collection.find_one({"_id": 1})
         if doc:
             loaded_state = pickle.loads(doc['data'])
-            if 'absences' not in loaded_state or not isinstance(loaded_state['absences'], pd.DataFrame):
-                loaded_state['absences'] = pd.DataFrame()
+            # Migration des anciennes absences vers non_effectuees si nécessaire, sinon init
+            if 'non_effectuees' not in loaded_state or not isinstance(loaded_state['non_effectuees'], pd.DataFrame):
+                loaded_state['non_effectuees'] = pd.DataFrame()
             app_state = loaded_state
     except: pass
 
@@ -328,6 +329,9 @@ def parse_rta_file(filename: str, content: bytes):
     if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
     if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
     if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
+    # S'assurer que les colonnes critiques sont en texte pour la comparaison
+    df['Statut Visite'] = df['Statut Visite'].astype(str)
+    df['Commentaire'] = df['Commentaire'].astype(str)
     return df
 
 @app.post("/api/import")
@@ -359,19 +363,39 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             df = parse_rta_file(files_data[0][0], files_data[0][1])
             if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
             
-            if 'Statut Visite' not in df.columns: df['Statut Visite'] = ''
-            if 'Commentaire' not in df.columns: df['Commentaire'] = ''
-            mask = df['Statut Visite'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False) | df['Commentaire'].astype(str).str.lower().str.contains('absent|reporté|reporte', na=False)
-            new_abs = df[mask].copy()
-            if not new_abs.empty:
-                if 'Nom' in new_abs.columns and 'Prénom' in new_abs.columns: new_abs['Nom complet'] = new_abs['Nom'].fillna('').astype(str) + ' ' + new_abs['Prénom'].fillna('').astype(str)
-                else: new_abs['Nom complet'] = ''
+            # --- NOUVELLE RÈGLE POUR NON-EFFECTUÉES ---
+            statut_lower = df['Statut Visite'].astype(str).str.strip().str.lower()
+            com_lower = df['Commentaire'].astype(str).str.lower()
+            
+            is_planifie = (statut_lower == 'planifié')
+            is_ok = com_lower.str.contains('ok', na=False)
+            # Règle : Planifié ET Commentaire != OK
+            is_non_eff = is_planifie & ~is_ok
+            
+            new_non_eff = df[is_non_eff].copy()
+            
+            if not new_non_eff.empty:
+                if 'Nom' in new_non_eff.columns and 'Prénom' in new_non_eff.columns: 
+                    new_non_eff['Nom complet'] = new_non_eff['Nom'].fillna('').astype(str) + ' ' + new_non_eff['Prénom'].fillna('').astype(str)
+                else: 
+                    new_non_eff['Nom complet'] = ''
+                    
                 show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Commentaire']
-                show_cols = [c for c in show_cols if c in new_abs.columns]
-                new_abs = new_abs[show_cols].copy()
-                if app_state.get('absences') is None or app_state['absences'].empty: app_state['absences'] = new_abs
-                else: app_state['absences'] = pd.concat([app_state['absences'], new_abs]).drop_duplicates(subset=['WORKDAY ID', 'Date Visite']).reset_index(drop=True)
+                show_cols = [c for c in show_cols if c in new_non_eff.columns]
+                new_non_eff = new_non_eff[show_cols].copy()
+                
+                if 'Date Visite' in new_non_eff.columns:
+                    new_non_eff['Date Visite'] = pd.to_datetime(new_non_eff['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+                
+                # Fusion avec les données existantes et déduplication sur toutes les colonnes
+                existing = app_state.get('non_effectuees', pd.DataFrame())
+                if existing.empty:
+                    app_state['non_effectuees'] = new_non_eff
+                else:
+                    combined = pd.concat([existing, new_non_eff], ignore_index=True)
+                    app_state['non_effectuees'] = combined.drop_duplicates().reset_index(drop=True)
 
+            # Mise à jour du statut Visite dans la liste médicale
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
                 for _, rta_row in df.iterrows():
@@ -583,11 +607,20 @@ async def generate_planning(config: str = Form(...)):
         print("ERREUR GÉNÉRATION:", traceback.format_exc())
         return {"message": f"❌ Erreur génération: {str(e)}"}
 
-@app.get("/api/absences")
-async def get_absences():
-    abs_df = app_state.get('absences')
-    if abs_df is None or abs_df.empty: return {"data": []}
-    return {"data": clean_for_json(abs_df)}
+@app.get("/api/non_effectuees")
+async def get_non_effectuees():
+    non_eff_df = app_state.get('non_effectuees')
+    if non_eff_df is None or non_eff_df.empty: return {"data": []}
+    return {"data": clean_for_json(non_eff_df)}
+
+@app.delete("/api/delete/{category}")
+async def delete_data(category: str):
+    if category == 'planning': app_state['plannings'] = {}
+    elif category == 'collab': app_state['medical_list'] = None
+    elif category == 'suivi': app_state['rta_data'] = None
+    elif category == 'non_effectuees': app_state['non_effectuees'] = pd.DataFrame()
+    save_history()
+    return {"message": "Données supprimées avec succès."}
 
 @app.get("/api/dashboard")
 async def get_dashboard(start_date: str = None, end_date: str = None):
@@ -717,3 +750,33 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, 
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
+@app.get("/api/export/{category}")
+async def export_data(category: str):
+    df = None
+    if category == 'planning':
+        if app_state['plannings']: df = list(app_state['plannings'].values())[0]
+    elif category == 'collab': df = app_state.get('medical_list')
+    elif category == 'suivi': df = app_state.get('rta_data')
+    elif category == 'non_effectuees': df = app_state.get('non_effectuees')
+    elif category == 'done_visites':
+        rta_data = app_state.get('rta_data')
+        if rta_data is not None: 
+            df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
+    elif category == 'generated':
+        med_list = app_state.get('medical_list')
+        if med_list is not None: 
+            df = med_list[med_list['Date Visite'].notna()].copy()
+
+    if df is None or df.empty: 
+        return {"error": "Aucune donnée à exporter"}
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+    output.seek(0)
+    
+    return StreamingResponse(
+        output, 
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+        headers={"Content-Disposition": f"attachment; filename={category}.xlsx"}
+    )
