@@ -14,6 +14,7 @@ import os
 import pickle
 import pymongo
 import bson
+import asyncio
 
 app = FastAPI()
 
@@ -80,19 +81,30 @@ async def read_root():
     with open(os.path.join("static", "index.html")) as f: return f.read()
 
 def get_excel_engine(filename: str):
-    if filename.endswith('.xlsb'): return 'pyxlsb'
-    elif filename.endswith('.xls'): return 'xlrd'
-    return None
+    if filename.endswith('.xlsb'): return 'calamine'
+    elif filename.endswith('.xls'): return 'calamine'
+    return 'calamine'
 
 def get_dates_from_week(week_name):
-    try:
-        match = re.search(r'\d+', str(week_name))
-        if match:
-            week_num = int(match.group())
-            year = datetime.date.today().year
+    name = str(week_name)
+    year = datetime.date.today().year
+    y = re.search(r'(20\d{2})', name)
+    if y: year = int(y.group(1))
+
+    week_num = None
+    m = re.search(r'[Ss](\d{1,2})', name)
+    if m:
+        week_num = int(m.group(1))
+    else:
+        for n in re.findall(r'\d+', name):
+            if 1 <= int(n) <= 53:
+                week_num = int(n); break
+
+    if week_num:
+        try:
             monday = datetime.date.fromisocalendar(year, week_num, 1)
             return {j: (monday + datetime.timedelta(days=i)) for i, j in enumerate(jours)}
-    except: pass
+        except ValueError: pass
     return {j: datetime.date.today() for j in jours}
 
 def is_planned(val):
@@ -323,7 +335,33 @@ def parse_liste_visite(filename: str, content: bytes):
     except Exception as e:
         print("ERREUR parse_liste_visite:", traceback.format_exc())
         return None
-    
+
+def parse_generated_legacy(filename: str, content: bytes):
+    """Parse un fichier export de l'ancien outil contenant les planifications."""
+    try:
+        engine = get_excel_engine(filename)
+        df = pd.read_excel(io.BytesIO(content), engine=engine)
+        df.columns = [str(c).strip() for c in df.columns]
+        df = df.rename(columns={'Priorité': 'Priorité Visite', 'Priorite': 'Priorité Visite'})
+        if 'WORKDAY ID' in df.columns:
+            df['WORKDAY ID'] = pd.to_numeric(
+                df['WORKDAY ID'].astype(str).str.replace(' ', '').str.replace('.0', ''),
+                errors='coerce').astype('Int64')
+        else:
+            return None
+        for col in ['Date Visite', 'Date d\'embauche', 'Créneau Visite', 'Shift Début', 'Shift Fin']:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col].astype(str), errors='coerce', dayfirst=True)
+        for col in ['Statut Visite', 'Nom', 'Prénom', 'Projet', 'Statut']:
+            if col not in df.columns:
+                df[col] = ''
+        if 'Priorité Visite' not in df.columns:
+            df['Priorité Visite'] = ''
+        return df
+    except Exception as e:
+        print("ERREUR parse_generated_legacy:", traceback.format_exc())
+        return None
+        
 def parse_rta_file(filename: str, content: bytes):
     engine = get_excel_engine(filename)
     xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
@@ -356,7 +394,7 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             files_data.append((f.filename, content))
 
         if category == 'planning':
-            df = parse_planning(files_data)
+            df = await asyncio.to_thread(parse_planning, files_data)
             wk_name = week_name if week_name else files_data[0][0].split('.')[0]
             app_state['plannings'][wk_name] = df
             if app_state.get('medical_list') is not None:
@@ -365,15 +403,53 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             return {"message": f"✅ Planning importé: {len(df)} lignes."}
             
         elif category == 'collab':
-            df = parse_liste_visite(files_data[0][0], files_data[0][1])
+            df = await asyncio.to_thread(parse_liste_visite, files_data[0][0], files_data[0][1])
             df = sync_statut_with_plannings(df, app_state['plannings'])
             app_state['medical_list'] = df
             save_history()
             display_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite']
             return {"message": f"✅ Collaborateurs importés: {len(df)} lignes.", "data": clean_for_json(df[display_cols].head(50))}
-            
+
+        elif category == 'legacy':
+            df = await asyncio.to_thread(parse_generated_legacy, files_data[0][0], files_data[0][1])
+            if df is None:
+                return {"message": "❌ Fichier illisible ou colonne 'WORKDAY ID' absente."}
+            df = df.drop_duplicates(subset=['WORKDAY ID'])
+
+            med_list = app_state.get('medical_list')
+            if med_list is None:
+                med_list = df.copy()
+            else:
+                med_list = med_list.copy()
+                lg = df.set_index('WORKDAY ID')
+                in_both = med_list['WORKDAY ID'].isin(lg.index)
+                for col in ['Statut Visite', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin']:
+                    if col in lg.columns:
+                        med_list.loc[in_both, col] = med_list.loc[in_both, 'WORKDAY ID'].map(lg[col])
+                add = df[~df['WORKDAY ID'].isin(med_list['WORKDAY ID'])].copy()
+                for col in set(med_list.columns) - set(add.columns):
+                    if col in ('Date Visite', 'Créneau Visite', 'Date d\'embauche'):
+                        add[col] = pd.NaT
+                    else:
+                        add[col] = ''
+                med_list = pd.concat([med_list, add], ignore_index=True)
+
+            for col, default in [('Statut Visite', 'Non Planifié'), ('Date Visite', pd.NaT), ('Créneau Visite', pd.NaT)]:
+                if col not in med_list.columns:
+                    med_list[col] = default
+            if 'Date d\'embauche' in med_list.columns:
+                if 'Ancienneté' not in med_list.columns:
+                    med_list['Ancienneté'] = med_list['Date d\'embauche'].apply(calculate_anciennete)
+                if 'Ancienneté_num' not in med_list.columns:
+                    med_list['Ancienneté_num'] = med_list['Date d\'embauche'].apply(calculate_anciennete_num)
+
+            app_state['medical_list'] = med_list
+            save_history()
+            n_planned = int((med_list['Statut Visite'] == 'Planifié').sum())
+            return {"message": f"✅ Reprise ancien outil : {n_planned} personnes planifiées actives."}
+                    
         elif category == 'suivi':
-            df = parse_rta_file(files_data[0][0], files_data[0][1])
+            df = await asyncio.to_thread(parse_rta_file, files_data[0][0], files_data[0][1])
             if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
             
             # ★★★ MODIFIÉ : Bloc de calcul des non-effectuées SUPPRIMÉ ici.
