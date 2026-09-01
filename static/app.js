@@ -47,16 +47,70 @@ function toggleSidebar() {
     }, 300);
 }
 
+// Système de cache pour éviter de recharger les tableaux en changeant d'onglet
+let pageCache = {};
+
+function clearCache(keys) {
+    if (keys && Array.isArray(keys)) {
+        keys.forEach(k => delete pageCache[k]);
+    } else {
+        pageCache = {};
+    }
+}
+
 function switchPage(pageId, element) {
     document.querySelectorAll('.page-content').forEach(div => div.classList.remove('active'));
     document.querySelectorAll('.top-tab').forEach(btn => btn.classList.remove('active'));
     document.getElementById('page-' + pageId).classList.add('active');
     element.classList.add('active');
-    if (pageId === 'p1') loadWeeksDropdown();
-    if (pageId === 'p3') { loadWeeks(); loadGenerated(); }
-    if (pageId === 'p4') { loadGenerated(); }
-    if (pageId === 'p6') loadAbsences();
-    if (pageId === 'p7') loadDashboard();
+    
+    // On ne charge les données que si la page n'est pas déjà en cache
+    if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
+    if (pageId === 'p3') { loadWeeks(); if (!pageCache.p4) { loadGenerated(); pageCache.p4 = true; } }
+    if (pageId === 'p4' && !pageCache.p4) { loadGenerated(); pageCache.p4 = true; }
+    if (pageId === 'p6' && !pageCache.p6) { loadAbsences(); pageCache.p6 = true; }
+    if (pageId === 'p7') { loadDashboard(); } // Le dashboard a un filtre de date, on le recharge toujours mais il est optimisé côté serveur
+}
+
+async function uploadFiles(inputId, category, tbodyId, statusId) {
+    const fileInput = document.getElementById(inputId);
+    const statusMsg = document.getElementById(statusId);
+    
+    if (!fileInput.files.length) { 
+        statusMsg.innerText = "⚠️ Aucun fichier."; 
+        return; 
+    }
+
+    const formData = new FormData();
+    for (let i = 0; i < fileInput.files.length; i++) formData.append("files", fileInput.files[i]);
+    formData.append("category", category);
+    
+    if (category === 'planning') {
+        const weekInput = document.getElementById('planning_week_name');
+        if (weekInput && weekInput.value) formData.append('week_name', weekInput.value);
+    }
+
+    statusMsg.innerText = "⏳ Traitement...";
+    const tbody = document.getElementById(tbodyId);
+    let thead = tbody.closest('table').querySelector('thead');
+    if (thead) thead.innerHTML = '';
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+
+    try {
+        const response = await fetch('/api/import', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error("Erreur serveur");
+        const result = await response.json();
+        statusMsg.innerText = result.message;
+        if (result.data) renderDynamicTable(result.data, tbodyId);
+        
+        // On vide le cache pour forcer le rechargement des autres pages affectées par l'import
+        if (category === 'planning') clearCache(['p1', 'p3', 'p4']);
+        if (category === 'collab') clearCache(['p2', 'p3', 'p4']);
+        if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadGenerated(); } // Le RTA met à jour le planning généré (P4)
+        
+    } catch (error) {
+        statusMsg.innerText = "❌ Erreur : " + error.message;
+    }
 }
 
 // ==========================================
