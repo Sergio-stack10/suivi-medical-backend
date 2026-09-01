@@ -84,14 +84,19 @@ async def read_root():
 
 # ★★★ MODIFIÉ : moteur calamine (5-10x plus rapide) si disponible, sinon fallback
 def get_excel_engine(filename: str):
+    """Choisit le moteur le plus rapide réellement disponible."""
     try:
-        if importlib.util.find_spec("python_calamine") is not None:
-            return 'calamine'
+        major, minor = (pd.__version__.split(".") + ["0", "0"])[:2]
+        if (int(major) == 2 and int(minor) >= 2) or int(major) > 2:
+            if importlib.util.find_spec("python_calamine") is not None:
+                return "calamine"
     except Exception:
         pass
-    if filename.endswith('.xlsb'): return 'pyxlsb'
-    elif filename.endswith('.xls'): return 'xlrd'
-    return 'openpyxl'
+    if filename.endswith(".xlsb"):
+        return "pyxlsb"
+    if filename.endswith(".xls"):
+        return "xlrd"
+    return "openpyxl"
 
 # ★★★ MODIFIÉ : parsing robuste du numéro de semaine (S36, planning_S36_2026, semaine 36, etc.)
 def get_dates_from_week(week_name):
@@ -249,10 +254,14 @@ def sync_statut_with_plannings(medical_list, history_plannings):
 # ★★★ MODIFIÉ : lecture unique via xls.parse (évite double lecture du fichier)
 def parse_planning(files_data: list):
     all_planning = []
+    errors = []
     for filename, content in files_data:
         engine = get_excel_engine(filename)
-        try: xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
-        except: continue
+        try:
+            xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+        except Exception as e:
+            errors.append(f"{filename}: lecture impossible ({e})")
+            continue
         df = None
         if "Tout (WFO+WFH)" in xls.sheet_names:
             df = xls.parse(sheet_name="Tout (WFO+WFH)", header=None, skiprows=3)
@@ -272,16 +281,22 @@ def parse_planning(files_data: list):
                 cols = [0 + offset, 4 + offset, 2 + offset, 5 + offset, 8 + offset, 10 + offset, 11 + offset, 12 + offset, 13 + offset, 17 + offset, 18 + offset, 19 + offset, 23 + offset, 24 + offset, 25 + offset, 29 + offset, 30 + offset, 31 + offset, 35 + offset, 36 + offset, 37 + offset, 41 + offset, 42 + offset, 43 + offset, 47 + offset, 48 + offset, 49 + offset]
                 new_cols = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet', 'Statut', 'Lundi_DE', 'Lundi_A', 'Lundi_Pause', 'Mardi_DE', 'Mardi_A', 'Mardi_Pause', 'Mercredi_DE', 'Mercredi_A', 'Mercredi_Pause', 'Jeudi_DE', 'Jeudi_A', 'Jeudi_Pause', 'Vendredi_DE', 'Vendredi_A', 'Vendredi_Pause', 'Samedi_DE', 'Samedi_A', 'Samedi_Pause', 'Dimanche_DE', 'Dimanche_A', 'Dimanche_Pause']
                 df = df.iloc[:, cols]; df.columns = new_cols
-            else: continue
-        else: continue
-        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r'\.0$', '', regex=True), errors='coerce').astype('Int64')
+            else:
+                errors.append(f"{filename}: en-tête 'Transport' introuvable")
+                continue
+        else:
+            errors.append(f"{filename}: feuille 'Tout (WFO+WFH)' ou 'TMM' introuvable")
+            continue
+        df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r"\.0$", "", regex=True), errors='coerce').astype('Int64')
         df['Paid ID'] = df['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
         df = df[df['WORKDAY ID'].notna()]
         df = df[~df['WORKDAY ID'].isin([0])]
-        for j in jours: df[f'{j}_Flag'] = df[f'{j}_DE'].apply(lambda x: 1 if is_planned(x) else 0)
+        for j in jours:
+            df[f'{j}_Flag'] = df[f'{j}_DE'].apply(lambda x: 1 if is_planned(x) else 0)
         all_planning.append(df)
-    if all_planning: return pd.concat(all_planning, ignore_index=True).drop_duplicates(subset=['WORKDAY ID'])
-    return pd.DataFrame()
+    if all_planning:
+        return pd.concat(all_planning, ignore_index=True).drop_duplicates(subset=['WORKDAY ID']), errors
+    return pd.DataFrame(), errors
 
 def parse_liste_visite(filename: str, content: bytes):
     try:
@@ -481,13 +496,16 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             files_data.append((f.filename, content))
 
         if category == 'planning':
-            df = await asyncio.to_thread(parse_planning, files_data)
+            df, errors = await asyncio.to_thread(parse_planning, files_data)
             wk_name = week_name if week_name else files_data[0][0].split('.')[0]
             app_state['plannings'][wk_name] = df
             if app_state.get('medical_list') is not None:
                 app_state['medical_list'] = sync_statut_with_plannings(app_state['medical_list'], app_state['plannings'])
             save_history()
-            return {"message": f"✅ Planning importé: {len(df)} lignes."}
+            msg = f"✅ Planning importé: {len(df)} lignes."
+            if errors:
+                msg = f"⚠️ Erreurs d'import : " + " | ".join(errors)
+            return {"message": msg}
             
         elif category == 'collab':
             df = await asyncio.to_thread(parse_liste_visite, files_data[0][0], files_data[0][1])
@@ -538,17 +556,18 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
 @app.get("/api/get_planning/{week_name}")
 async def get_planning(week_name: str):
     df = app_state['plannings'].get(week_name)
-    if df is None: return {"data": []}
-    display_df = df.copy()
+    if df is None or df.empty:
+        return {"data": []}
     dates_map = get_dates_from_week(week_name)
     rename_map = {}
     for j in jours:
         d_str = dates_map[j].strftime('%d/%m/%Y')
-        if f'{j}_DE' in display_df.columns:
+        if f'{j}_DE' in df.columns:
             rename_map[f'{j}_DE'] = f'{d_str} - Début'
             rename_map[f'{j}_A'] = f'{d_str} - Fin'
             rename_map[f'{j}_Flag'] = f'{d_str} - Présent'
-    display_df = display_df.rename(columns=rename_map)
+    # ★ On ne garde que 50 lignes AVANT le formatage -> affichage quasi instantané
+    display_df = df.head(50).rename(columns=rename_map)
     for j in jours:
         d_str = dates_map[j].strftime('%d/%m/%Y')
         for suffix in [' - Début', ' - Fin']:
@@ -556,11 +575,13 @@ async def get_planning(week_name: str):
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(format_time_display)
     cols_to_show = ['TRANSPORT', 'WORKDAY ID', 'Paid ID', 'Nom', 'Projet']
-    if 'Statut' in display_df.columns: cols_to_show.append('Statut')
-    for j in jours: 
+    if 'Statut' in display_df.columns:
+        cols_to_show.append('Statut')
+    for j in jours:
         d_str = dates_map[j].strftime('%d/%m/%Y')
         cols_to_show += [f'{d_str} - Début', f'{d_str} - Fin', f'{d_str} - Présent']
-    return {"data": clean_for_json(display_df[cols_to_show].head(50))}
+    cols_to_show = [c for c in cols_to_show if c in display_df.columns]
+    return {"data": clean_for_json(display_df[cols_to_show])}
 
 @app.delete("/api/delete/{category}")
 async def delete_data(category: str):
