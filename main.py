@@ -162,7 +162,6 @@ def calculate_anciennete_num(hire_date_str):
     except: return 0
 
 def clean_for_json(df):
-    """Convertit un DataFrame en dictionnaire valide pour le web en gérant les formats Dates et Heures."""
     if df is None or df.empty: return []
     df = df.copy()
     for col in df.columns:
@@ -324,15 +323,11 @@ def parse_rta_file(filename: str, content: bytes):
     df = df.rename(columns=current_renames)
     df = df.loc[:, ~df.columns.duplicated()]
     df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
-    
     df['WORKDAY ID'] = pd.to_numeric(df['WORKDAY ID'].astype(str).str.replace(" ", "").str.replace(".0", ""), errors='coerce').astype('Int64')
-    
     if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
     if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
-    
     if 'Heure Départ' in df.columns: df['Heure Départ'] = pd.to_datetime(df['Heure Départ'].astype(str), errors='coerce')
     if 'Heure Retour' in df.columns: df['Heure Retour'] = pd.to_datetime(df['Heure Retour'].astype(str), errors='coerce')
-    
     return df
 
 @app.post("/api/import")
@@ -603,12 +598,12 @@ async def get_dashboard():
         
     med_df = rta_data.copy()
     
-    # S'assurer que les colonnes existent pour éviter les KeyError
+    # S'assurer que les colonnes existent
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
         if col not in med_df.columns:
             med_df[col] = ''
             
-    # Calcul de la durée (si les colonnes existent et sont valides)
+    # Calcul de la durée
     if 'Heure Départ' in med_df.columns and 'Heure Retour' in med_df.columns:
         med_df['Heure Départ'] = pd.to_datetime(med_df['Heure Départ'].astype(str), errors='coerce')
         med_df['Heure Retour'] = pd.to_datetime(med_df['Heure Retour'].astype(str), errors='coerce')
@@ -632,7 +627,7 @@ async def get_dashboard():
     is_planifie = (statut_lower == 'planifié') & ~is_fait & ~is_abs
     is_non_planifie = (statut_lower == 'non planifié')
     
-    total_a_passer = len(med_df)
+    total_a_passer = len(med_df) # Total du fichier RTA
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
     reste_a_planifier = len(med_df[is_non_planifie])
