@@ -211,15 +211,24 @@
                 <!-- Page 7 -->
                 <div id="page-p7" class="page-content">
                     <div class="page-header"><h1>Dashboard & Extractions</h1></div>
+                    
+                    <div class="action-bar" style="margin-bottom: 20px; align-items: center; background: #f9f9f9; padding: 15px; border-radius: 10px;">
+                        <strong style="margin-right: 10px;">Filtrer par date :</strong>
+                        <input type="date" id="p7_start_date" class="form-control" style="max-width: 150px; padding: 5px;">
+                        <span style="margin: 0 10px;">au</span>
+                        <input type="date" id="p7_end_date" class="form-control" style="max-width: 150px; padding: 5px;">
+                        <button class="btn-primary" onclick="loadDashboard()" style="padding: 8px 15px; margin-left: 10px;"><i class="fas fa-filter"></i> Appliquer</button>
+                    </div>
+
                     <div class="cards-grid" id="p7_metrics" style="margin-bottom: 20px;">
                         <div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>
                     </div>
                     <div class="card" style="margin-bottom: 20px;">
-                        <div class="card-header">1. Total à passer vs Planifié par projet</div>
+                        <div class="card-header">1. Total à passer vs (Planifié + Effectuée) par projet</div>
                         <div id="chart1_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
                     <div class="card" style="margin-bottom: 20px;">
-                        <div class="card-header">2. Planifié vs Visite effectuée vs Absents/Reporté</div>
+                        <div class="card-header">2. Planifié vs (Effectuée + Absent) par date</div>
                         <div id="chart2_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
                     <div class="card" style="margin-bottom: 20px;">
@@ -242,9 +251,6 @@
                         <div class="table-container"><table id="p7_done_table"><thead></thead><tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
                 </div>
-
-            </main>
-        </div>
         
         <!-- Signature -->
 <div class="footer-fix"><span style="color: #FFFFFF;">Developed by</span> <span style="color: #25E2CC; font-weight: 700;">TEAM TMM 🦄</span></div>
