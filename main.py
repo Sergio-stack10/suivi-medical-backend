@@ -376,36 +376,9 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             df = parse_rta_file(files_data[0][0], files_data[0][1])
             if df is None: return {"message": "❌ Erreur: Le fichier RTA est illisible."}
             
-            # --- NOUVELLE RÈGLE POUR NON-EFFECTUÉES ---
-            statut_lower = df['Statut Visite'].astype(str).str.strip().str.lower()
-            com_lower = df['Commentaire'].astype(str).str.lower()
+            # ★★★ MODIFIÉ : Bloc de calcul des non-effectuées SUPPRIMÉ ici.
+            # La liste est désormais calculée dynamiquement dans /api/non_effectuees.
             
-            is_planifie = (statut_lower == 'planifié')
-            is_ok = com_lower.str.contains('ok', na=False)
-            is_non_eff = is_planifie & ~is_ok
-            
-            new_non_eff = df[is_non_eff].copy()
-            
-            if not new_non_eff.empty:
-                if 'Nom' in new_non_eff.columns and 'Prénom' in new_non_eff.columns: 
-                    new_non_eff['Nom complet'] = new_non_eff['Nom'].fillna('').astype(str) + ' ' + new_non_eff['Prénom'].fillna('').astype(str)
-                else: 
-                    new_non_eff['Nom complet'] = ''
-                    
-                show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Commentaire']
-                show_cols = [c for c in show_cols if c in new_non_eff.columns]
-                new_non_eff = new_non_eff[show_cols].copy()
-                
-                if 'Date Visite' in new_non_eff.columns:
-                    new_non_eff['Date Visite'] = pd.to_datetime(new_non_eff['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
-                
-                existing = app_state.get('non_effectuees', pd.DataFrame())
-                if existing.empty:
-                    app_state['non_effectuees'] = new_non_eff
-                else:
-                    combined = pd.concat([existing, new_non_eff], ignore_index=True)
-                    app_state['non_effectuees'] = combined.drop_duplicates().reset_index(drop=True)
-
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
                 for _, rta_row in df.iterrows():
@@ -457,10 +430,14 @@ async def get_planning(week_name: str):
 
 @app.delete("/api/delete/{category}")
 async def delete_data(category: str):
+    # ★★★ MODIFIÉ : message informatif pour non_effectuees (liste calculée dynamiquement)
     if category == 'planning': app_state['plannings'] = {}
     elif category == 'collab': app_state['medical_list'] = None
     elif category == 'suivi': app_state['rta_data'] = None
-    elif category == 'non_effectuees': app_state['non_effectuees'] = pd.DataFrame()
+    elif category == 'non_effectuees':
+        app_state['non_effectuees'] = pd.DataFrame()
+        save_history()
+        return {"message": "ℹ️ Cette liste est calculée automatiquement (visites planifiées sur un jour passé sans commentaire 'OK'). Elle se recalcule à partir du fichier Suivi."}
     save_history()
     return {"message": "Données supprimées avec succès."}
 
@@ -619,9 +596,45 @@ async def generate_planning(config: str = Form(...)):
 
 @app.get("/api/non_effectuees")
 async def get_non_effectuees():
-    non_eff_df = app_state.get('non_effectuees')
-    if non_eff_df is None or non_eff_df.empty: return {"data": []}
-    return {"data": clean_for_json(non_eff_df)}
+    # ★★★ MODIFIÉ : calcul dynamique à chaque consultation.
+    # Règle : Statut = 'Planifié' + Date Visite STRICTEMENT ANTÉRIEURE à aujourd'hui
+    #        + Commentaire différent de 'OK'.
+    rta_data = app_state.get('rta_data')
+    if rta_data is None or rta_data.empty: return {"data": []}
+
+    df = rta_data.copy()
+    today = pd.Timestamp(datetime.date.today())
+
+    statut_lower = df['Statut Visite'].astype(str).str.strip().str.lower()
+    com_lower = df['Commentaire'].astype(str).str.lower()
+    date_visite = pd.to_datetime(df['Date Visite'], errors='coerce')
+
+    is_planifie = (statut_lower == 'planifié')
+    is_ok = com_lower.str.contains('ok', na=False)
+    is_passe = date_visite.notna() & (date_visite < today)
+
+    non_eff = df[is_planifie & ~is_ok & is_passe].copy()
+    if non_eff.empty: return {"data": []}
+
+    if 'Nom' in non_eff.columns and 'Prénom' in non_eff.columns:
+        non_eff['Nom complet'] = non_eff['Nom'].fillna('').astype(str).str.strip() + ' ' + non_eff['Prénom'].fillna('').astype(str).str.strip()
+    else:
+        non_eff['Nom complet'] = non_eff.get('Nom', '')
+
+    non_eff = non_eff.sort_values('Date Visite', ascending=False)
+
+    show_cols = ['WORKDAY ID', 'Nom complet', 'Projet', 'Statut Visite', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Commentaire']
+    show_cols = [c for c in show_cols if c in non_eff.columns]
+    non_eff = non_eff[show_cols].copy()
+
+    if 'Date Visite' in non_eff.columns:
+        non_eff['Date Visite'] = pd.to_datetime(non_eff['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+    if 'Heure Départ' in non_eff.columns:
+        non_eff['Heure Départ'] = pd.to_datetime(non_eff['Heure Départ'], errors='coerce').dt.strftime('%H:%M').fillna('')
+    if 'Heure Retour' in non_eff.columns:
+        non_eff['Heure Retour'] = pd.to_datetime(non_eff['Heure Retour'], errors='coerce').dt.strftime('%H:%M').fillna('')
+
+    return {"data": clean_for_json(non_eff)}
 
 @app.get("/api/dashboard")
 async def get_dashboard(start_date: str = None, end_date: str = None):
