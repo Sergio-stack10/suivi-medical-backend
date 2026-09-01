@@ -1,6 +1,6 @@
 let deleteTarget = null;
 let pageCache = {};
-let dashboardData = null; // Variable globale pour stocker les données du dashboard
+let dashboardData = null; // Stocke les données du dashboard pour le filtre local
 
 // ==========================================
 // CACHE MANAGEMENT
@@ -23,11 +23,8 @@ window.addEventListener('DOMContentLoaded', () => {
         const user = localStorage.getItem('username') || 'Admin';
         document.getElementById('userInfo').innerText = user;
         document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
-        // Initialiser la page 1 au démarrage
         const activeTab = document.querySelector('.top-tab.active');
-        if (activeTab) {
-            switchPage('p1', activeTab);
-        }
+        if (activeTab) { switchPage('p1', activeTab); }
     }
 });
 
@@ -41,11 +38,8 @@ function handleLogin() {
         document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
         localStorage.setItem('isLoggedIn', 'true');
         localStorage.setItem('username', user);
-        // Initialiser la page 1 après connexion
         const activeTab = document.querySelector('.top-tab.active');
-        if (activeTab) {
-            switchPage('p1', activeTab);
-        }
+        if (activeTab) { switchPage('p1', activeTab); }
     } else {
         document.getElementById('authError').style.display = 'block';
     }
@@ -166,7 +160,6 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
 function renderDynamicTable(data, tbodyId) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
-    
     let thead = tbody.closest('table').querySelector('thead');
     
     if (!data || data.length === 0) {
@@ -199,14 +192,10 @@ async function loadWeeksDropdown() {
         const data = await res.json();
         const select = document.getElementById('p1_week_select');
         select.innerHTML = '';
-        if (data.weeks.length === 0) {
-            select.innerHTML = '<option>Aucune semaine</option>';
-            return;
-        }
+        if (data.weeks.length === 0) { select.innerHTML = '<option>Aucune semaine</option>'; return; }
         data.weeks.forEach(week => {
             const option = document.createElement('option');
-            option.value = week.name;
-            option.innerText = week.name;
+            option.value = week.name; option.innerText = week.name;
             select.appendChild(option);
         });
         loadSelectedPlanning();
@@ -232,10 +221,7 @@ async function loadWeeks() {
         const data = await res.json();
         const select = document.getElementById('week_select');
         select.innerHTML = '';
-        if (data.weeks.length === 0) {
-            select.innerHTML = '<option>Aucune semaine</option>';
-            return;
-        }
+        if (data.weeks.length === 0) { select.innerHTML = '<option>Aucune semaine</option>'; return; }
         data.weeks.forEach(week => {
             const option = document.createElement('option');
             option.value = week.name; option.innerText = week.name;
@@ -249,17 +235,13 @@ function updateWeekDates() {
     const select = document.getElementById('week_select');
     const weekName = select.value;
     if (!weekName) return;
-    
     const selectedOption = select.options[select.selectedIndex];
     const dates = JSON.parse(selectedOption.dataset.dates || '[]');
-    
     const daysGrid = document.getElementById('days_grid');
     daysGrid.innerHTML = '';
     const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
-    
     for (let i = 0; i < 5; i++) {
         const dateStr = dates[i] || new Date().toISOString().split('T')[0];
-        
         const card = document.createElement('div');
         card.className = 'day-card';
         card.innerHTML = `
@@ -281,7 +263,6 @@ async function generatePlanning() {
     const statusMsg = document.getElementById('p3_status');
     const cards = document.querySelectorAll('.day-card');
     const config = { week: week, days: [] };
-    
     cards.forEach(card => {
         config.days.push({
             actif: card.querySelector('input[type="checkbox"]').checked,
@@ -294,7 +275,6 @@ async function generatePlanning() {
             statut_filter: card.querySelectorAll('select')[1].value
         });
     });
-
     statusMsg.innerText = "⏳ Génération...";
     try {
         const formData = new FormData();
@@ -304,9 +284,7 @@ async function generatePlanning() {
         statusMsg.innerText = result.message;
         clearCache(['p4']);
         loadGenerated();
-    } catch (e) {
-        statusMsg.innerText = "❌ Erreur.";
-    }
+    } catch (e) { statusMsg.innerText = "❌ Erreur."; }
 }
 
 async function loadGenerated() {
@@ -319,7 +297,7 @@ async function loadGenerated() {
 }
 
 async function unplanAll() {
-    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications (dates de visites assignées) ?')) {
+    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications ?')) {
         await fetch('/api/unplan', { method: 'POST' });
         clearCache(['p3', 'p4', 'p7']);
         loadGenerated();
@@ -339,9 +317,7 @@ async function loadNonEffectuees() {
         const res = await fetch('/api/non_effectuees');
         const result = await res.json();
         renderDynamicTable(result.data, 'p6_table_body');
-    } catch(e) {
-        tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>';
-    }
+    } catch(e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
 }
 
 async function loadDashboard() {
@@ -355,7 +331,6 @@ async function loadDashboard() {
     
     const startDate = document.getElementById('p7_start_date') ? document.getElementById('p7_start_date').value : '';
     const endDate = document.getElementById('p7_end_date') ? document.getElementById('p7_end_date').value : '';
-    
     let url = '/api/dashboard?';
     if (startDate) url += `start_date=${startDate}&`;
     if (endDate) url += `end_date=${endDate}&`;
@@ -368,9 +343,8 @@ async function loadDashboard() {
     try {
         const res = await fetch(url);
         if(!res.ok) throw new Error("Erreur réseau " + res.status);
-        const result = await res.json();
-                dashboardData = result; // Sauvegarder les données pour les filtres locaux
-        const m = result.metrics || {};
+        dashboardData = await res.json();
+        const m = dashboardData.metrics || {};
         
         metricsDiv.innerHTML = `
             <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
@@ -379,119 +353,126 @@ async function loadDashboard() {
             <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste_a_planifier || 0}</h3><p>Reste à planifier</p></div></div>
         `;
         
-        renderDynamicTable(result.avg_duration || [], 'p7_avg_body');
-        renderDynamicTable(result.top5 || [], 'p7_top5_body');
-        renderDynamicTable(result.done_visites || [], 'p7_done_body');
+        renderDynamicTable(dashboardData.avg_duration || [], 'p7_avg_body');
+        renderDynamicTable(dashboardData.top5 || [], 'p7_top5_body');
+        renderDynamicTable(dashboardData.done_visites || [], 'p7_done_body');
         
-        if (result.charts) {
+        // Chart 1
+        populateProjFilter(); // Remplir la liste à cases à cocher
+        filterChart1();       // Dessiner le graphique filtré
+        
+        // Chart 2
+        const c2 = dashboardData.charts.chart2 || [];
+        if (c2.length > 0) {
+            const max2 = Math.max(...c2.map(d => d.planifie));
             const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
-            
-            Plotly.purge(chart1Div);
-            Plotly.purge(chart2Div);
-            Plotly.purge(chart3Div);
-            
-            // Chart 1
-            filterChart1();
-            
-            // --- FILTRE PAR PROJET (MULTI-SÉLECTION) ---
-            const projFilter = document.getElementById('p7_proj_filter');
-            // Récupérer la liste des projets sélectionnés
-            const selectedProjs = Array.from(projFilter.selectedOptions).map(opt => opt.value);
-            
-            // Remplir le menu déroulant avec la liste des projets
-            const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
-            // On ajoute l'option "Tous" au début si elle n'y est pas (utile au premier chargement)
-            if (!projFilter.options.length || projFilter.options[0].value !== "") {
-                projFilter.innerHTML = '<option value="">Tous les projets</option>';
-            }
-            uniqueProjects.forEach(p => {
-                // Ne pas ajouter de doublons dans la liste
-                if (!Array.from(projFilter.options).some(opt => opt.value === p)) {
-                    const opt = document.createElement('option');
-                    opt.value = p;
-                    opt.innerText = p;
-                    projFilter.appendChild(opt);
-                }
-            });
-            
-            // Filtrer les données : si la liste est vide ou contient "", on prend tout
-            let filteredC1;
-            if (selectedProjs.length === 0 || selectedProjs.includes("")) {
-                filteredC1 = c1;
-            } else {
-                filteredC1 = c1.filter(d => selectedProjs.includes(d.project));
-            }
-            
-            if (filteredC1.length > 0) {
-                const max1 = Math.max(...filteredC1.map(d => d.total));
-                const t1 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
-                const t3 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: filteredC1.map(d=>d.faite), textposition: 'inside', offsetgroup: '0' };
-                
-                const layout1 = { ...layout, barmode: 'overlay', legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max1 * 1.15] } };
-                Plotly.newPlot(chart1Div, [t1, t3], layout1);
-            } else { 
-                chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>'; 
-            }
-            
-            // Chart 2
-            const c2 = result.charts.chart2 || [];
-            if (c2.length > 0) {
-                const max2 = Math.max(...c2.map(d => d.planifie));
-                const faite_arr = c2.map(d => d.faite);
-                const date_order = c2.map(d=>d.date); 
-                
-                const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
-                const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' };
-                
-                const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max2 * 1.15] } };
-                Plotly.newPlot(chart2Div, [t1, t2], layout2); 
-            } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+            const faite_arr = c2.map(d => d.faite);
+            const date_order = c2.map(d=>d.date);
+            const t1 = { x: c2.map(d=>d.date), y: c2.map(d=>d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d=>d.planifie), textposition: 'outside', offsetgroup: '0' };
+            const t2 = { x: c2.map(d=>d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' };
+            const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: {title: {text: 'Légende'}}, margin: {t: 50, b: 100}, yaxis: { range: [0, max2 * 1.15] } };
+            Plotly.newPlot(chart2Div, [t1, t2], layout2);
+        } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-            // Chart 3
-            const c3 = result.charts.chart3 || {effectuee:0, reste:0, non_planifie:0};
-            if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
-                const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
-                Plotly.newPlot(chart3Div, data3, {...layout, barmode: null, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}});
-            } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
-        }
+        // Chart 3
+        const c3 = dashboardData.charts.chart3 || {effectuee:0, reste:0, non_planifie:0};
+        if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
+            const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
+            const layout3 = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, showlegend: false, margin: {t: 40, b: 20, l: 20, r: 20}};
+            Plotly.newPlot(chart3Div, data3, layout3);
+        } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+
     } catch(e) {
         console.error("Err loadDashboard:", e);
         metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur de chargement</h3></div></div>';
     }
-    // ==========================================
-// FILTRE GRAPHIQUE 1
+}
+
 // ==========================================
+// LOGIQUE FILTRE GRAPHIQUE 1 (CHECKBOXES)
+// ==========================================
+function toggleProjDropdown(event) {
+    event.stopPropagation();
+    document.getElementById("proj_checkbox_list").classList.toggle("show");
+}
+
+window.onclick = function(event) {
+    if (!event.target.matches('.multiselect-box') && !event.target.closest('.multiselect-container')) {
+        var dropdowns = document.getElementsByClassName("multiselect-options");
+        for (let i = 0; i < dropdowns.length; i++) {
+            if (dropdowns[i].classList.contains('show')) {
+                dropdowns[i].classList.remove('show');
+            }
+        }
+    }
+}
+
+function populateProjFilter() {
+    if (!dashboardData) return;
+    const c1 = dashboardData.charts.chart1 || [];
+    const container = document.getElementById("proj_checkbox_list");
+    container.innerHTML = '';
+    const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
+    
+    // Option "Tous"
+    const allDiv = document.createElement("div");
+    allDiv.innerHTML = `<input type="checkbox" id="proj_all" checked onchange="onProjChange()"> <label for="proj_all" style="margin-left:5px; font-weight:bold;">Tous les projets</label>`;
+    container.appendChild(allDiv);
+
+    uniqueProjects.forEach((p, index) => {
+        const div = document.createElement("div");
+        div.innerHTML = `<input type="checkbox" class="proj_item" value="${p}" checked onchange="onProjChange()"> <label style="margin-left:5px;">${p}</label>`;
+        container.appendChild(div);
+    });
+    updateProjLabel();
+}
+
+function onProjChange() {
+    const allBox = document.getElementById("proj_all");
+    const itemBoxes = document.querySelectorAll('.proj_item');
+    const isAllClicked = event.target.id === "proj_all";
+    
+    if (isAllClicked) {
+        itemBoxes.forEach(cb => cb.checked = allBox.checked);
+    } else {
+        const allCheckedNow = Array.from(itemBoxes).every(cb => cb.checked);
+        allBox.checked = allCheckedNow;
+    }
+    updateProjLabel();
+    filterChart1();
+}
+
+function updateProjLabel() {
+    const allBox = document.getElementById("proj_all");
+    const itemBoxes = document.querySelectorAll('.proj_item');
+    const checkedCount = Array.from(itemBoxes).filter(cb => cb.checked).length;
+    const label = document.getElementById("proj_filter_label");
+    if (allBox.checked || checkedCount === itemBoxes.length) {
+        label.innerText = "Tous les projets";
+    } else if (checkedCount === 0) {
+        label.innerText = "Aucun projet sélectionné";
+    } else {
+        label.innerText = `${checkedCount} projet(s) sélectionné(s)`;
+    }
+}
+
 function filterChart1() {
     if (!dashboardData) return;
-    
     const c1 = dashboardData.charts.chart1 || [];
-    const projFilter = document.getElementById('p7_proj_filter');
     const chart1Div = document.getElementById('chart1_div');
     const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
 
-    // 1. Remplir le menu déroulant la première fois
-    if (projFilter.options.length <= 1) {
-        const uniqueProjects = [...new Set(c1.map(d => d.project))].sort();
-        uniqueProjects.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p;
-            opt.innerText = p;
-            projFilter.appendChild(opt);
-        });
-    }
-
-    // 2. Récupérer les projets sélectionnés
-    const selectedProjs = Array.from(projFilter.selectedOptions).map(opt => opt.value);
+    const itemBoxes = document.querySelectorAll('.proj_item');
+    const selectedProjs = Array.from(itemBoxes).filter(cb => cb.checked).map(cb => cb.value);
+    const allBox = document.getElementById("proj_all");
     
-    // 3. Filtrer les données
     let filteredC1;
-    if (selectedProjs.length === 0 || selectedProjs.includes("")) {
+    if (allBox.checked || selectedProjs.length === 0) {
         filteredC1 = c1;
     } else {
         filteredC1 = c1.filter(d => selectedProjs.includes(d.project));
     }
     
-    // 4. Dessiner le graphique
     if (filteredC1.length > 0) {
         const max1 = Math.max(...filteredC1.map(d => d.total));
         const t1 = { x: filteredC1.map(d=>d.project), y: filteredC1.map(d=>d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d=>d.total), textposition: 'outside', offsetgroup: '0' };
@@ -502,5 +483,4 @@ function filterChart1() {
     } else { 
         chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>'; 
     }
-}
 }
