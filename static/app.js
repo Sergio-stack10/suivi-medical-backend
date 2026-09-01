@@ -393,19 +393,28 @@ async function loadDashboard() {
 // ==========================================
 function toggleProjDropdown(event) {
     event.stopPropagation();
-    document.getElementById("proj_checkbox_list").classList.toggle("show");
+    const list = document.getElementById("proj_checkbox_list");
+    const box = event.currentTarget;
+    list.classList.toggle("show");
+    box.classList.toggle("open");
 }
 
-window.onclick = function(event) {
-    if (!event.target.matches('.multiselect-box') && !event.target.closest('.multiselect-container')) {
-        var dropdowns = document.getElementsByClassName("multiselect-options");
-        for (let i = 0; i < dropdowns.length; i++) {
-            if (dropdowns[i].classList.contains('show')) {
-                dropdowns[i].classList.remove('show');
-            }
-        }
-    }
+function closeProjDropdown() {
+    const list = document.getElementById("proj_checkbox_list");
+    const box = document.querySelector('.multiselect-box');
+    if (list) list.classList.remove('show');
+    if (box) box.classList.remove('open');
 }
+
+// Fermeture au clic extérieur
+window.addEventListener('click', function(event) {
+    if (!event.target.closest('.multiselect-container')) closeProjDropdown();
+});
+
+// Fermeture avec la touche Échap
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') closeProjDropdown();
+});
 
 function populateProjFilter() {
     if (!dashboardData) return;
