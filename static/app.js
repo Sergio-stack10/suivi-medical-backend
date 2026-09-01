@@ -151,6 +151,7 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         if (category === 'planning') clearCache(['p1', 'p3', 'p4']);
         if (category === 'collab') clearCache(['p2', 'p3', 'p4']);
         if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
+        if (category === 'legacy') { clearCache(['p3', 'p4']); loadGenerated(); }        
         
     } catch (error) {
         statusMsg.innerText = "❌ Erreur : " + error.message;
