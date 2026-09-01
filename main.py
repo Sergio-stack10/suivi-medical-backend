@@ -596,39 +596,29 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if rta_data is None or rta_data.empty:
         return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
         
-    med_df_full = rta_data.copy()
+    # 1. Calcul du Total à passer AVANT tout filtre de date
+    total_a_passer = len(rta_data)
     
-    # S'assurer que les colonnes existent
+    # 2. Préparation du DataFrame
+    med_df = rta_data.copy()
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
-        if col not in med_df_full.columns:
-            med_df_full[col] = ''
+        if col not in med_df.columns:
+            med_df[col] = ''
             
-    # Calculer le Total à passer AVANT le filtre de date
-    total_a_passer = len(med_df_full)
+    if 'Date Visite' in med_df.columns and not pd.api.types.is_datetime64_any_dtype(med_df['Date Visite']):
+        med_df['Date Visite'] = pd.to_datetime(med_df['Date Visite'], errors='coerce')
+    elif 'Date Visite' not in med_df.columns:
+        med_df['Date Visite'] = pd.NaT
     
-    # Optimisation : Convertir en datetime SEULEMENT si ce n'est pas déjà fait
-    if 'Date Visite' in med_df_full.columns and not pd.api.types.is_datetime64_any_dtype(med_df_full['Date Visite']):
-        med_df_full['Date Visite'] = pd.to_datetime(med_df_full['Date Visite'], errors='coerce')
-    elif 'Date Visite' not in med_df_full.columns:
-        med_df_full['Date Visite'] = pd.NaT
-    
-    # Appliquer le filtre de date pour les autres métriques et graphiques
-    med_df = med_df_full.copy()
+    # 3. Application du filtre de date pour les autres métriques
     if start_date:
         med_df = med_df[med_df['Date Visite'] >= pd.to_datetime(start_date)]
     if end_date:
         med_df = med_df[med_df['Date Visite'] <= pd.to_datetime(end_date)]
         
-    if med_df.empty and not med_df_full.empty:
-        # Si le filtre retourne vide, on renvoie quand même le total à passer
+    if med_df.empty and total_a_passer > 0:
         return {
-            "metrics": {
-                "total_a_passer": total_a_passer, 
-                "total_planifie": 0, 
-                "total_fait": 0, 
-                "reste_a_planifier": total_a_passer,
-                "pct_fait": "0.0%"
-            }, 
+            "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0.0%"}, 
             "avg_duration": [], "top5": [], "done_visites": [], 
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
@@ -645,25 +635,19 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         else:
             med_df['Durée (min)'] = np.nan
         
-    # Mapping des projets
     if 'Projet_Affichage' not in med_df.columns:
-        if 'Projet' in med_df.columns:
-            med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
-        else:
-            med_df['Projet_Affichage'] = 'N/A'
+        if 'Projet' in med_df.columns: med_df['Projet_Affichage'] = med_df['Projet'].apply(get_mapped_project)
+        else: med_df['Projet_Affichage'] = 'N/A'
         
-    # --- NOUVELLE RÈGLE DE CALCUL ---
+    # --- CALCULS ---
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
     is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié')
-    # Non effectuée = Tout ce qui est Planifié mais qui n'est pas OK
     is_non_eff = is_planifie & ~is_fait
     
     total_fait = len(med_df[is_fait])
     total_non_eff = len(med_df[is_non_eff])
     total_planifie = len(med_df[is_planifie])
-    # Le reste à planifier correspond à ceux qui ne sont ni fait, ni planifié (sur l'ensemble du fichier)
-    reste_a_planifier = total_a_passer - total_fait - total_planifie
-    if reste_a_planifier < 0: reste_a_planifier = 0 # Sécurité
+    reste_a_planifier = max(0, total_a_passer - total_fait - total_planifie)
     
     metrics = {
         "total_a_passer": total_a_passer, 
@@ -676,43 +660,35 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     chart1_data = []
     chart2_data = []
     if not med_df.empty:
-        # Chart 1 by Project
         counts_df = med_df.groupby(['Projet_Affichage']).agg(
             Total=('WORKDAY ID', 'count'),
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            NonEff=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~med_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
+            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~med_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
         ).reset_index().sort_values('Total', ascending=False)
         
         for _, row in counts_df.iterrows():
             chart1_data.append({
-                "project": str(row['Projet_Affichage']), 
-                "total": int(row['Total']), 
-                "planifie": int(row['Planifie']), 
-                "faite": int(row['Effectuee']),
-                "absent": int(row['NonEff']) # On garde la clé 'absent' pour le JS mais ça contient les non effectuées
+                "project": str(row['Projet_Affichage']), "total": int(row['Total']), 
+                "planifie": int(row['Planifie']), "faite": int(row['Effectuee']), "absent": int(row['Absent'])
             })
             
-        # Chart 2 by Date
         date_df = med_df[med_df['Date Visite'].notna()].copy()
         date_df['DateDT'] = date_df['Date Visite']
         chart2_df = date_df.groupby('DateDT').agg(
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum()),
-            NonEff=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~date_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
+            Absent=('Statut Visite', lambda x: ((x.str.strip().str.lower() == 'planifié') & (~date_df.loc[x.index, 'Commentaire'].astype(str).str.lower().str.contains('ok', na=False))).sum())
         ).reset_index().sort_values('DateDT')
         
         for _, row in chart2_df.iterrows():
             chart2_data.append({
-                "date": row['DateDT'].strftime('%d/%m/%Y'), 
-                "planifie": int(row['Planifie']), 
-                "faite": int(row['Effectuee']),
-                "absent": int(row['NonEff'])
+                "date": row['DateDT'].strftime('%d/%m/%Y'), "planifie": int(row['Planifie']), 
+                "faite": int(row['Effectuee']), "absent": int(row['Absent'])
             })
 
     chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
     
-    # Avg duration
     med_df['Date'] = med_df['Date Visite'].dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
     avg_duration = []
@@ -721,7 +697,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
         
-    # Top 5
     top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top5 = []
     if not top5_df.empty:
@@ -731,19 +706,14 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
         top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
         
-    # Done visites
     done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     done_visites = []
     if not done_df.empty:
         done_df['Nom complet'] = done_df['Nom'].fillna('').astype(str) + ' ' + done_df['Prénom'].fillna('').astype(str)
-        if 'Payroll ID' not in done_df.columns: done_df['Payroll ID'] = ''
         done_df['Statut visite'] = 'Done'
         done_visites = clean_for_json(done_df[['WORKDAY ID', 'Nom complet', 'Projet_Affichage', 'Statut visite']])
         
     return {
-        "metrics": metrics, 
-        "avg_duration": avg_duration, 
-        "top5": top5, 
-        "done_visites": done_visites, 
+        "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, 
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
