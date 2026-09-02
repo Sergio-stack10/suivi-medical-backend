@@ -65,6 +65,7 @@ def load_history():
 def save_history():
     client = get_mongo_client()
     if client is None:
+        print("⚠️ MONGO_URI non défini — sauvegarde locale uniquement (perdue au redéploiement)")
         try:
             with open("app_state.pkl", "wb") as f: pickle.dump(app_state, f, protocol=pickle.HIGHEST_PROTOCOL)
         except: pass
@@ -74,7 +75,9 @@ def save_history():
         collection = db["app_state"]
         pickle_bytes = pickle.dumps(app_state, protocol=pickle.HIGHEST_PROTOCOL)
         collection.update_one({"_id": 1}, {"$set": {"data": bson.Binary(pickle_bytes)}}, upsert=True)
-    except: pass
+        print("✅ Sauvegarde MongoDB effectuée.")
+    except Exception:
+        print("ERREUR save_history:", traceback.format_exc())
 
 load_history()
 
@@ -361,6 +364,7 @@ def parse_liste_visite(filename: str, content: bytes):
         
         final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite']
         return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
+    
     except Exception as e:
         print("ERREUR parse_liste_visite:", traceback.format_exc())
         return None
@@ -548,7 +552,7 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
 
         # ★★★ NOUVEAU : import du fichier de planning généré exporté de l'ancien outil
-        elif category == 'generated_planning':
+        elif category in ('legacy', 'generated_planning'):
             df = await asyncio.to_thread(parse_generated_legacy, files_data[0][0], files_data[0][1])
             if df is None:
                 return {"message": "❌ Fichier illisible ou colonne WORKDAY ID absente."}
@@ -557,7 +561,8 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             save_history()
             n_planned = int((med_list['Statut Visite'].astype(str).str.strip() == 'Planifié').sum())
             return {"message": f"✅ Planning ancien outil importé: {len(df)} lignes, {n_planned} personnes planifiées actives."}
-
+        else:
+            return {"message": f"❌ Catégorie inconnue : {category}"}
     except Exception as e:
         print("ERREUR BACKEND:", traceback.format_exc())
         return {"message": f"❌ Erreur Python: {str(e)}"}
@@ -644,6 +649,18 @@ async def generate_planning(config: str = Form(...)):
         current_week = config['week']
         current_planning = app_state['plannings'].get(current_week)
         if medical_list is None or current_planning is None: return {"message": "❌ Erreur: Liste ou planning manquant."}
+        current_planning = current_planning.copy()
+
+        # ★ NORMALISATION DES IDs : tout mettre au même format (nombre) pour éviter
+        # l'erreur "merge on str and Int64 columns"
+        for d in (medical_list, current_planning):
+            d['WORKDAY ID'] = pd.to_numeric(
+                d['WORKDAY ID'].astype(str).str.replace(" ", "", regex=False).str.replace(r"\.0$", "", regex=True),
+                errors='coerce').astype('Int64')
+        if 'Payroll ID' in medical_list.columns:
+            medical_list['Payroll ID'] = medical_list['Payroll ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
+        if 'Paid ID' in current_planning.columns:
+            current_planning['Paid ID'] = current_planning['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
             
         if app_state.get('rta_data') is not None:
             rta_df = app_state['rta_data']
@@ -899,7 +916,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         avg_df['Durée Moyenne'] = avg_df['Durée (min)'].apply(format_duration)
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
-        
+
     top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top5 = []
     if not top5_df.empty:
@@ -925,6 +942,13 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, 
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
+@app.get("/api/health")
+async def health():
+    client = get_mongo_client()
+    if client is None:
+        return {"mongo": "❌ NON CONNECTÉ — les données seront perdues à chaque redéploiement",
+                "mode": "fichier local éphémère"}
+    return {"mongo": "✅ Connecté — persistance garantie", "mode": "MongoDB"}
 
 @app.get("/api/export/{category}")
 async def export_data(category: str):
