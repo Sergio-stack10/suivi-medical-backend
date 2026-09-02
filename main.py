@@ -697,6 +697,12 @@ async def generate_planning(config: str = Form(...)):
                              ('Commentaire', '')]:
             if col not in medical_list.columns:
                 medical_list[col] = default
+        # ★ Garde-fous : colonnes utilisées par la génération (évite les KeyError)
+        for col, default in [('Projet', 'N/A'), ('Statut', 'ENC'), ('Priorité Visite', 'N/A'),
+                             ('Payroll ID', ''), ('Ancienneté_num', 0)]:
+            if col not in medical_list.columns:
+                medical_list[col] = default
+        medical_list['Ancienneté_num'] = pd.to_numeric(medical_list['Ancienneté_num'], errors='coerce').fillna(0)
 
         # Normalisation des IDs en TEXTE (évite l'erreur de merge)
         current_planning = current_planning.copy()
