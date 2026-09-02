@@ -646,20 +646,186 @@ async def get_weeks():
         weeks_data.append({"name": wk, "dates": [dates_map[j].strftime('%Y-%m-%d') for j in jours[:5]]})
     return {"weeks": weeks_data}
 
-@app.get("/api/generated")
-async def get_generated():
-    med_list = app_state.get('medical_list')
-    if med_list is None: return {"data": []}
-    if 'Date Visite' not in med_list.columns: return {"data": []}
-    mask = med_list['Date Visite'].notna()
-    planned = med_list[mask].copy()
-    if planned.empty: return {"data": []}
-    # ★ PORTAGE STREAMLIT : Shift Début/Fin depuis le planning de la semaine
-    planned = await asyncio.to_thread(enrich_shifts, planned, app_state.get('plannings', {}))
-    planned['Date Visite'] = planned['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
-    planned['Créneau Visite'] = pd.to_datetime(planned['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
-    out_cols = [c for c in ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Projet', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Priorité Visite'] if c in planned.columns]
-    return {"data": clean_for_json(planned[out_cols])}
+@app.post("/api/generate")
+async def generate_planning(config: str = Form(...)):
+    try:
+        config = json.loads(config)
+        medical_list = app_state['medical_list'].copy()
+        current_week = config['week']
+        current_planning = app_state['plannings'].get(current_week)
+        if medical_list is None or current_planning is None:
+            return {"message": "❌ Erreur: Liste ou planning manquant."}
+
+        # Colonnes garanties (données anciennes)
+        for col, default in [('Statut Visite', 'Non Planifié'), ('Date Visite', pd.NaT), ('Créneau Visite', pd.NaT),
+                             ('Shift Début', ''), ('Shift Fin', ''), ('Heure Départ', pd.NaT), ('Heure Retour', pd.NaT),
+                             ('Commentaire', '')]:
+            if col not in medical_list.columns:
+                medical_list[col] = default
+
+        # Normalisation des IDs en TEXTE (évite l'erreur de merge)
+        current_planning = current_planning.copy()
+        medical_list['WORKDAY ID'] = norm_id_series(medical_list['WORKDAY ID'])
+        current_planning['WORKDAY ID'] = norm_id_series(current_planning['WORKDAY ID'])
+        if 'Payroll ID' in medical_list.columns:
+            medical_list['Payroll ID'] = medical_list['Payroll ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
+        if 'Paid ID' in current_planning.columns:
+            current_planning['Paid ID'] = current_planning['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
+
+        total_requested = 0
+        total_planned = 0
+        raisons = {}
+
+        def add_raison(key, n):
+            if n > 0: raisons[key] = raisons.get(key, 0) + n
+
+        for day_config in config['days']:
+            if not day_config['actif']: continue
+            date_obj = datetime.datetime.strptime(day_config['date'], '%Y-%m-%d').date()
+            day_idx = date_obj.weekday()
+            sel_day = jours[day_idx]
+            de_col = f"{sel_day}_DE"
+            a_col = f"{sel_day}_A"
+
+            qty_r = max(int(float(day_config.get('qty_river') or 0)), 0)
+            qty_o = max(int(float(day_config.get('qty_others') or 0)), 0)
+            target = qty_r + qty_o
+            if target == 0: continue
+            total_requested += target
+
+            cols_to_drop = [c for c in ['Nom', 'Projet', 'Statut'] if c in current_planning.columns]
+            planning_to_merge = current_planning.drop(columns=cols_to_drop).copy()
+            merged_wid = pd.merge(medical_list, planning_to_merge, on='WORKDAY ID', how='inner', suffixes=('', '_planning'))
+            unmatched_med = medical_list[~medical_list['WORKDAY ID'].isin(merged_wid['WORKDAY ID'])].copy()
+            if 'Payroll ID' in unmatched_med.columns and 'Paid ID' in planning_to_merge.columns:
+                unmatched_med_renamed = unmatched_med.rename(columns={'Payroll ID': 'Paid ID'})
+                merged_pid = pd.merge(unmatched_med_renamed, planning_to_merge, on='Paid ID', how='inner', suffixes=('', '_planning'))
+                merged_pid['WORKDAY ID'] = merged_pid['WORKDAY ID'].fillna(merged_pid.get('WORKDAY ID_planning'))
+                merged_wid = pd.concat([merged_wid, merged_pid], ignore_index=True)
+
+            working_df = merged_wid.copy()
+            if working_df.empty:
+                add_raison("personne en commun liste/planning", target)
+                continue
+
+            # --- CONTRAINTES RÉELLES (obligatoires) ---
+            mask_day = working_df[de_col].apply(is_planned)
+            add_raison("sans shift ce jour-là", (~mask_day).sum())
+            working_df = working_df[mask_day].copy()
+
+            c_debut = datetime.datetime.strptime(day_config['debut'], '%H:%M').time()
+            c_fin = datetime.datetime.strptime(day_config['fin'], '%H:%M').time()
+
+            def is_available_during_slot(row, de_c, a_c, cd, cf):
+                sd = get_time_obj(row[de_c]); sf = get_time_obj(row[a_c])
+                if not sd or not sf: return False
+                return sd < cf and sf > cd
+
+            working_df['_is_avail'] = working_df.apply(lambda r: is_available_during_slot(r, de_col, a_col, c_debut, c_fin), axis=1)
+            add_raison("shift hors créneau horaire", (~working_df['_is_avail']).sum())
+            working_df = working_df[working_df['_is_avail']].copy()
+
+            already_mask = working_df['Statut Visite'].isin(['Planifié', 'Visite Faite'])
+            add_raison("déjà planifiés / visites faites", already_mask.sum())
+            working_df = working_df[~already_mask].copy()
+
+            if working_df.empty: continue
+
+            # --- PRÉFÉRENCES (NON BLOQUANTES : simple ordre de classement) ---
+            statut_filter = (day_config.get('statut_filter') or 'Tous')
+            if statut_filter != 'Tous':
+                working_df['_statut_match'] = (working_df['Statut'].astype(str).str.upper() == statut_filter.upper()).astype(int)
+            else:
+                working_df['_statut_match'] = 1
+            working_df['_is_replan'] = working_df.apply(lambda r: 'absent' in str(r.get('Statut Visite', '')).lower() or 'report' in str(r.get('Statut Visite', '')).lower() or 'absent' in str(r.get('Commentaire', '')).lower() or 'report' in str(r.get('Commentaire', '')).lower(), axis=1)
+            if day_config['prio'] != "Aucune priorité" and 'Priorité Visite' in working_df.columns:
+                working_df['_is_priority'] = working_df['Priorité Visite'].astype(str).str.strip().str.lower() == day_config['prio'].lower()
+            else:
+                working_df['_is_priority'] = False
+
+            working_df = working_df.sort_values(by=['_is_replan', '_is_priority', '_statut_match', 'Ancienneté_num'],
+                                                ascending=[False, False, False, False])
+
+            is_river = working_df['Projet'].astype(str).str.contains('RIVER|AMAZON', case=False, na=False)
+            rivers = working_df[is_river]
+            others = working_df[~is_river]
+
+            slots = []
+            cur = datetime.datetime.combine(date_obj, c_debut)
+            end = datetime.datetime.combine(date_obj, c_fin) - datetime.timedelta(minutes=30)
+            while cur <= end:
+                slots.append(cur.time()); cur += datetime.timedelta(minutes=30)
+            slot_counts = {s: 0 for s in slots}
+
+            def try_assign(df_group, tq):
+                picked = 0
+                for idx, row in df_group.iterrows():
+                    if picked >= tq: break
+                    sd = get_time_obj(row[de_col]); sf = get_time_obj(row[a_col])
+                    if not sd or not sf: continue
+                    sfe = sf if sf >= sd else datetime.time(23, 59)
+                    assigned = None
+                    for slot in slots:
+                        slot_end = (datetime.datetime.combine(date_obj, slot) + datetime.timedelta(minutes=30)).time()
+                        if sd <= slot and sfe >= slot_end and slot_counts[slot] < 4:
+                            assigned = slot; break
+                    if assigned is not None:
+                        wid = row['WORKDAY ID']
+                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Planifié'
+                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.to_datetime(date_obj)
+                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.to_datetime(datetime.datetime.combine(date_obj, assigned))
+                        cs = medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Commentaire']
+                        mc = str(cs.values[0]).lower() if not cs.empty else ''
+                        if 'absent' in mc or 'report' in mc:
+                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Commentaire'] = ''
+                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Heure Départ'] = pd.NaT
+                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Heure Retour'] = pd.NaT
+                        slot_counts[assigned] += 1
+                        picked += 1
+                return picked
+
+            # ★ Quotas River/Autres = préférences ; on complète le deficit avec les restants
+            picked_r = try_assign(rivers, qty_r)
+            picked_o = try_assign(others, qty_o)
+            deficit = (qty_r - picked_r) + (qty_o - picked_o)
+            picked_extra = 0
+            if deficit > 0:
+                leftovers = pd.concat([rivers.iloc[picked_r:], others.iloc[picked_o:]], ignore_index=True)
+                leftovers = leftovers.sort_values(by=['_is_replan', '_is_priority', '_statut_match', 'Ancienneté_num'],
+                                                  ascending=[False, False, False, False])
+                picked_extra = try_assign(leftovers, deficit)
+
+            day_picked = picked_r + picked_o + picked_extra
+            total_planned += day_picked
+
+            if day_picked < target:
+                capacity = len(slots) * 4
+                if sum(slot_counts.values()) >= capacity:
+                    add_raison("capacité des créneaux atteinte (4 pers/créneau)", len(working_df) - day_picked)
+
+        app_state['medical_list'] = medical_list
+        save_history()
+
+        msg = f"✅ {total_planned} collaborateurs planifiés (sur {total_requested} demandés)."
+        if total_planned < total_requested:
+            detail = ", ".join([f"{v} {k}" for k, v in raisons.items()]) if raisons else "créneaux/shifts incompatibles"
+            msg += f" ⚠️ Explication (cumul sur les jours actifs) : {detail}."
+
+        start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
+        end_date = start_date + datetime.timedelta(days=6)
+        planned_this_week = medical_list[
+            (medical_list['Statut Visite'] == 'Planifié') &
+            (pd.to_datetime(medical_list['Date Visite'], errors='coerce') >= pd.Timestamp(start_date)) &
+            (pd.to_datetime(medical_list['Date Visite'], errors='coerce') <= pd.Timestamp(end_date))
+        ].copy()
+        planned_this_week = enrich_shifts(planned_this_week, app_state.get('plannings', {}))
+        planned_this_week['Date Visite'] = planned_this_week['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
+        planned_this_week['Créneau Visite'] = pd.to_datetime(planned_this_week['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
+        out_cols = [c for c in ['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Priorité Visite'] if c in planned_this_week.columns]
+        return {"message": msg, "data": clean_for_json(planned_this_week[out_cols])}
+    except Exception as e:
+        print("ERREUR GÉNÉRATION:", traceback.format_exc())
+        return {"message": f"❌ Erreur génération: {str(e)}"}
 
 @app.post("/api/unplan")
 async def unplan_all():
@@ -675,6 +841,29 @@ async def unplan_all():
         app_state['medical_list'] = med_list
         save_history()
     return {"message": "Toutes les planifications ont été effacées."}
+@app.get("/api/collab")
+async def get_collab():
+    med = app_state.get('medical_list')
+    if med is None or med.empty: return {"data": []}
+    cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Créneau Visite']
+    cols = [c for c in cols if c in med.columns]
+    df = med[cols].head(200).copy()
+    for c, fmt in [('Date d\'embauche', '%d/%m/%Y'), ('Date Visite', '%d/%m/%Y'), ('Créneau Visite', '%H:%M')]:
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c], errors='coerce').dt.strftime(fmt).fillna('')
+    return {"data": clean_for_json(df)}
+
+@app.get("/api/suivi")
+async def get_suivi():
+    df = app_state.get('rta_data')
+    if df is None or df.empty: return {"data": []}
+    d = df.head(200).copy()
+    if 'Date Visite' in d.columns:
+        d['Date Visite'] = pd.to_datetime(d['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+    for c in ['Heure Départ', 'Heure Retour']:
+        if c in d.columns:
+            d[c] = pd.to_datetime(d[c].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
+    return {"data": clean_for_json(d)}
 
 @app.post("/api/generate")
 async def generate_planning(config: str = Form(...)):
