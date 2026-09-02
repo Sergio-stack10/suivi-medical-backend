@@ -72,10 +72,31 @@ function switchPage(pageId, element) {
     element.classList.add('active');
 
     if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
+    if (pageId === 'p2') loadCollab();          // ★ toujours rechargé depuis le serveur
     if (pageId === 'p3') { loadWeeks(); loadGenerated(); pageCache.p4 = true; }
     if (pageId === 'p4' && !pageCache.p4) { loadGenerated(); pageCache.p4 = true; }
+    if (pageId === 'p5') loadSuivi();           // ★ toujours rechargé depuis le serveur
     if (pageId === 'p6' && !pageCache.p6) { loadNonEffectuees(); pageCache.p6 = true; }
-    if (pageId === 'p7') { loadDashboard(); }
+    if (pageId === 'p7') loadDashboard();
+}
+async function loadCollab() {
+    const tbody = document.getElementById('p2_table_body');
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    try {
+        const res = await fetch('/api/collab');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p2_table_body');
+    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
+}
+
+async function loadSuivi() {
+    const tbody = document.getElementById('p5_table_body');
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    try {
+        const res = await fetch('/api/suivi');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p5_table_body');
+    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
 }
 
 // ==========================================
@@ -234,14 +255,40 @@ async function loadWeeks() {
         data.weeks.forEach(week => {
             const option = document.createElement('option');
             option.value = week.name; option.innerText = week.name;
-            option.dataset.dates = JSON.stringify(week.dates || []); // ★ transmet les dates de la semaine
+            option.dataset.dates = JSON.stringify(week.dates || []);
             select.appendChild(option);
         });
+        // ★ Restaure la semaine précédemment configurée
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem('genConfig') || 'null'); } catch (e) {}
+        if (saved && saved.week) {
+            const opt = Array.from(select.options).find(o => o.value === saved.week);
+            if (opt) select.value = saved.week;
+        }
         updateWeekDates();
     } catch (e) { console.error('Err loadWeeks:', e); }
 }
 
-// ★ Dates pré-remplies depuis le planning enregistré, mais MODIFIABLES
+// ★ Sauvegarde locale du formulaire de génération (persiste au refresh)
+function saveGenConfig() {
+    const week = document.getElementById('week_select').value;
+    if (!week || week === 'Aucune semaine') return;
+    const config = { week: week, days: [] };
+    document.querySelectorAll('.day-card').forEach(card => {
+        config.days.push({
+            actif: card.querySelector('input[type="checkbox"]').checked,
+            date: card.querySelector('input[type="date"]').value,
+            debut: card.querySelectorAll('input[type="time"]')[0].value,
+            fin: card.querySelectorAll('input[type="time"]')[1].value,
+            qty_river: card.querySelector('input[type="number"]').value,
+            qty_others: card.querySelectorAll('input[type="number"]')[1].value,
+            prio: card.querySelectorAll('select')[0].value,
+            statut_filter: card.querySelectorAll('select')[1].value
+        });
+    });
+    localStorage.setItem('genConfig', JSON.stringify(config));
+}
+
 function updateWeekDates() {
     const select = document.getElementById('week_select');
     const weekName = select.value;
@@ -251,25 +298,43 @@ function updateWeekDates() {
     const daysGrid = document.getElementById('days_grid');
     daysGrid.innerHTML = '';
     const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
+
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('genConfig') || 'null'); } catch (e) {}
+    const useSaved = saved && saved.week === weekName && Array.isArray(saved.days) && saved.days.length === 5;
+
     for (let i = 0; i < 5; i++) {
-        const dateStr = dates[i] || new Date().toISOString().split('T')[0];
+        const cfg = useSaved ? saved.days[i] : null;
+        const dateStr = (cfg && cfg.date) ? cfg.date : (dates[i] || new Date().toISOString().split('T')[0]);
         const card = document.createElement('div');
         card.className = 'day-card';
         card.innerHTML = `
-            <div class="day-title">${days[i]} <input type="checkbox" checked onchange="this.closest('.day-card').classList.toggle('disabled', !this.checked)"></div>
+            <div class="day-title">${days[i]} <input type="checkbox" ${cfg && !cfg.actif ? '' : 'checked'} onchange="this.closest('.day-card').classList.toggle('disabled', !this.checked)"></div>
             <div class="day-input-group"><label>Date</label><input type="date" class="form-control" value="${dateStr}"></div>
-            <div class="day-input-group"><label>Début</label><input type="time" class="form-control" value="09:00"></div>
-            <div class="day-input-group"><label>Fin</label><input type="time" class="form-control" value="16:00"></div>
-            <div class="day-input-group"><label>Nb River</label><input type="number" class="form-control" value="5" min="0"></div>
-            <div class="day-input-group"><label>Nb Autres</label><input type="number" class="form-control" value="20" min="0"></div>
-            <div class="day-input-group"><label>Priorité</label><select class="form-control"><option>Aucune priorité</option><option>Visite systématique</option><option>Visite d'embauche</option></select></div>
-            <div class="day-input-group"><label>Statut</label><select class="form-control"><option>Tous</option><option>CC</option><option>ENC</option></select></div>
-        `;
+            <div class="day-input-group"><label>Début</label><input type="time" class="form-control" value="${cfg ? cfg.debut : '09:00'}"></div>
+            <div class="day-input-group"><label>Fin</label><input type="time" class="form-control" value="${cfg ? cfg.fin : '16:00'}"></div>
+            <div class="day-input-group"><label>Nb River</label><input type="number" class="form-control" value="${cfg ? cfg.qty_river : 5}" min="0"></div>
+            <div class="day-input-group"><label>Nb Autres</label><input type="number" class="form-control" value="${cfg ? cfg.qty_others : 20}" min="0"></div>
+            <div class="day-input-group"><label>Priorité</label><select class="form-control">
+                <option ${cfg && cfg.prio === 'Aucune priorité' ? 'selected' : ''}>Aucune priorité</option>
+                <option ${cfg && cfg.prio === 'Visite systématique' ? 'selected' : ''}>Visite systématique</option>
+                <option ${cfg && cfg.prio === "Visite d'embauche" ? 'selected' : ''}>Visite d'embauche</option>
+            </select></div>
+            <div class="day-input-group"><label>Statut</label><select class="form-control">
+                <option ${cfg && cfg.statut_filter === 'Tous' ? 'selected' : ''}>Tous</option>
+                <option ${cfg && cfg.statut_filter === 'CC' ? 'selected' : ''}>CC</option>
+                <option ${cfg && cfg.statut_filter === 'ENC' ? 'selected' : ''}>ENC</option>
+            </select></div>`;
+        if (cfg && !cfg.actif) card.classList.add('disabled');
         daysGrid.appendChild(card);
     }
+    daysGrid.addEventListener('input', saveGenConfig);
+    daysGrid.addEventListener('change', saveGenConfig);
+    saveGenConfig();
 }
 
 async function generatePlanning() {
+    saveGenConfig(); // ★ sauvegarde avant génération
     const week = document.getElementById('week_select').value;
     const statusMsg = document.getElementById('p3_status');
     const cards = document.querySelectorAll('.day-card');
@@ -296,15 +361,6 @@ async function generatePlanning() {
         clearCache(['p4']);
         loadGenerated();
     } catch (e) { statusMsg.innerText = "❌ Erreur."; }
-}
-
-async function loadGenerated() {
-    try {
-        const res = await fetch('/api/generated');
-        const result = await res.json();
-        renderDynamicTable(result.data, 'p3_table_body');
-        renderDynamicTable(result.data, 'p4_table_body');
-    } catch (e) { console.error('Err loadGenerated:', e); }
 }
 
 async function unplanAll() {
