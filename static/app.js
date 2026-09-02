@@ -72,31 +72,12 @@ function switchPage(pageId, element) {
     element.classList.add('active');
 
     if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
-    if (pageId === 'p2') loadCollab();          // ★ toujours rechargé depuis le serveur
+    if (pageId === 'p2') loadCollab();
     if (pageId === 'p3') { loadWeeks(); loadGenerated(); pageCache.p4 = true; }
     if (pageId === 'p4' && !pageCache.p4) { loadGenerated(); pageCache.p4 = true; }
-    if (pageId === 'p5') loadSuivi();           // ★ toujours rechargé depuis le serveur
+    if (pageId === 'p5') loadSuivi();
     if (pageId === 'p6' && !pageCache.p6) { loadNonEffectuees(); pageCache.p6 = true; }
     if (pageId === 'p7') loadDashboard();
-}
-async function loadCollab() {
-    const tbody = document.getElementById('p2_table_body');
-    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    try {
-        const res = await fetch('/api/collab');
-        const result = await res.json();
-        renderDynamicTable(result.data, 'p2_table_body');
-    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
-}
-
-async function loadSuivi() {
-    const tbody = document.getElementById('p5_table_body');
-    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    try {
-        const res = await fetch('/api/suivi');
-        const result = await res.json();
-        renderDynamicTable(result.data, 'p5_table_body');
-    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
 }
 
 // ==========================================
@@ -164,7 +145,10 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
 
     try {
         const response = await fetch('/api/import', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error("Erreur serveur");
+        if (!response.ok) {
+            const txt = await response.text();
+            throw new Error("Serveur " + response.status + " : " + txt.slice(0, 300));
+        }
         const result = await response.json();
         statusMsg.innerText = result.message;
         if (result.data) renderDynamicTable(result.data, tbodyId);
@@ -172,16 +156,17 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         // ★ Rafraîchissement automatique selon le type d'import
         if (category === 'planning') {
             clearCache(['p1', 'p3', 'p4']);
-            await loadWeeksDropdown(); // recharge le menu des semaines + le tableau page 1
+            await loadWeeksDropdown();
         }
-        if (category === 'collab') clearCache(['p2', 'p3', 'p4']);
-        if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
-        if (category === 'generated_planning' || category === 'legacy') {
+        if (category === 'collab') { clearCache(['p2', 'p3', 'p4']); loadCollab(); }
+        if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadSuivi(); loadGenerated(); }
+        if (category === 'legacy' || category === 'generated_planning') {
             clearCache(['p3', 'p4']);
             loadGenerated();
         }
     } catch (error) {
-        statusMsg.innerText = "❌ Erreur : " + error.message;
+        statusMsg.innerText = "❌ Erreur : " + (error.message || error);
+        console.error("Erreur import :", error);
     }
 }
 
@@ -214,7 +199,6 @@ function renderDynamicTable(data, tbodyId) {
 // ==========================================
 // PAGE 1 : PLANNING
 // ==========================================
-// ★★ FONCTION RESTAURÉE : c'est elle qui manquait et provoquait l'erreur ★★
 async function loadWeeksDropdown() {
     try {
         const res = await fetch('/api/weeks');
@@ -242,9 +226,31 @@ async function loadSelectedPlanning() {
 }
 
 // ==========================================
-// PAGE 3 & 4 : GÉNÉRATION & PLANNING GÉNÉRÉ
+// PAGES 2 & 5 : RECHARGEMENT DEPUIS LE SERVEUR (persistance)
 // ==========================================
-// ★ Version avec transmission des dates (menu déroulant de la page 3)
+async function loadCollab() {
+    const tbody = document.getElementById('p2_table_body');
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    try {
+        const res = await fetch('/api/collab');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p2_table_body');
+    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
+}
+
+async function loadSuivi() {
+    const tbody = document.getElementById('p5_table_body');
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    try {
+        const res = await fetch('/api/suivi');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p5_table_body');
+    } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
+}
+
+// ==========================================
+// PAGE 3 : GÉNÉRATION (avec persistance de la config)
+// ==========================================
 async function loadWeeks() {
     try {
         const res = await fetch('/api/weeks');
@@ -258,7 +264,7 @@ async function loadWeeks() {
             option.dataset.dates = JSON.stringify(week.dates || []);
             select.appendChild(option);
         });
-        // ★ Restaure la semaine précédemment configurée
+        // Restaure la semaine précédemment configurée
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem('genConfig') || 'null'); } catch (e) {}
         if (saved && saved.week) {
@@ -269,7 +275,7 @@ async function loadWeeks() {
     } catch (e) { console.error('Err loadWeeks:', e); }
 }
 
-// ★ Sauvegarde locale du formulaire de génération (persiste au refresh)
+// Sauvegarde locale du formulaire de génération (persiste au refresh)
 function saveGenConfig() {
     const week = document.getElementById('week_select').value;
     if (!week || week === 'Aucune semaine') return;
@@ -356,7 +362,6 @@ async function generatePlanning() {
         const formData = new FormData();
         formData.append('config', JSON.stringify(config));
         const res = await fetch('/api/generate', { method: 'POST', body: formData });
-        // ★ Si le serveur renvoie une erreur HTTP, on affiche son contenu réel
         if (!res.ok) {
             const txt = await res.text();
             throw new Error("Serveur " + res.status + " : " + txt.slice(0, 300));
@@ -366,10 +371,21 @@ async function generatePlanning() {
         clearCache(['p4']);
         loadGenerated();
     } catch (e) {
-        // ★ On affiche l'erreur RÉELLE au lieu de "❌ Erreur."
         statusMsg.innerText = "❌ Erreur : " + (e.message || e);
         console.error("Erreur génération complète :", e);
     }
+}
+
+// ==========================================
+// PAGES 3 & 4 : PLANNING GÉNÉRÉ
+// ==========================================
+async function loadGenerated() {
+    try {
+        const res = await fetch('/api/generated');
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p3_table_body');
+        renderDynamicTable(result.data, 'p4_table_body');
+    } catch (e) { console.error('Err loadGenerated:', e); }
 }
 
 async function unplanAll() {
@@ -382,7 +398,7 @@ async function unplanAll() {
 }
 
 // ==========================================
-// PAGE 6 & 7
+// PAGE 6 : NON-EFFECTUÉES
 // ==========================================
 async function loadNonEffectuees() {
     const tbody = document.getElementById('p6_table_body');
@@ -396,6 +412,9 @@ async function loadNonEffectuees() {
     } catch (e) { tbody.innerHTML = '<tr><td class="empty-msg">Erreur.</td></tr>'; }
 }
 
+// ==========================================
+// PAGE 7 : DASHBOARD
+// ==========================================
 async function loadDashboard() {
     const metricsDiv = document.getElementById('p7_metrics');
     const avgBody = document.getElementById('p7_avg_body');
@@ -465,9 +484,8 @@ async function loadDashboard() {
 }
 
 // ==========================================
-// LOGIQUE FILTRE GRAPHIQUE 1 (CHECKBOXES)
+// FILTRE GRAPHIQUE 1 (dropdown à cases à cocher)
 // ==========================================
-// ★ Menu déroulant repliable en popover
 function toggleProjDropdown(event) {
     event.stopPropagation();
     const list = document.getElementById("proj_checkbox_list");
@@ -483,12 +501,10 @@ function closeProjDropdown() {
     if (box) box.classList.remove('open');
 }
 
-// Fermeture au clic à l'extérieur
 window.addEventListener('click', function (event) {
     if (!event.target.closest('.multiselect-container')) closeProjDropdown();
 });
 
-// Fermeture avec la touche Échap
 document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeProjDropdown();
 });
@@ -504,7 +520,7 @@ function populateProjFilter() {
     allDiv.innerHTML = `<input type="checkbox" id="proj_all" checked onchange="onProjChange()"> <label for="proj_all" style="margin-left:5px; font-weight:bold;">Tous les projets</label>`;
     container.appendChild(allDiv);
 
-    uniqueProjects.forEach((p, index) => {
+    uniqueProjects.forEach((p) => {
         const div = document.createElement("div");
         div.innerHTML = `<input type="checkbox" class="proj_item" value="${p}" checked onchange="onProjChange()"> <label style="margin-left:5px;">${p}</label>`;
         container.appendChild(div);
