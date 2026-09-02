@@ -105,6 +105,34 @@ def get_excel_engine(filename: str):
     if filename.endswith(".xlsb"): return "pyxlsb"
     if filename.endswith(".xls"): return "xlrd"
     return "openpyxl"
+def read_excel_robust(content: bytes, filename: str):
+    """★ Ouvre un fichier Excel en essayant plusieurs moteurs + diagnostic clair."""
+    if not content or len(content) < 8:
+        return None, f"{filename}: fichier vide ou tronqué ({len(content) if content else 0} octets)"
+
+    # Signature des premiers octets -> dit ce que le fichier est RÉELLEMENT
+    head = content[:8]
+    if head[:4] == b'PK\x03\x04': sig = "ZIP (xlsx/xlsb moderne)"
+    elif head[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': sig = "OLE2 (xls ancien ou chiffré)"
+    elif head[:5] == b'<?xml' or head[:2] == b'< ': sig = "XML/HTML (PAS un vrai Excel)"
+    else: sig = "inconnue"
+
+    ext = '.' + filename.lower().split('.')[-1] if '.' in filename else ''
+    engines = {
+        '.xlsb': ['calamine', 'pyxlsb', 'openpyxl'],
+        '.xls':  ['calamine', 'xlrd', 'openpyxl'],
+        '.xlsx': ['calamine', 'openpyxl'],
+        '.xlsm': ['calamine', 'openpyxl'],
+    }.get(ext, ['calamine', 'openpyxl', 'pyxlsb'])
+
+    errors = []
+    for engine in engines:
+        try:
+            xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+            return xls, None
+        except Exception as e:
+            errors.append(f"{engine}: {e}")
+    return None, f"{filename}: illisible (signature={sig} | " + " | ".join(errors) + ")"
 
 def get_dates_from_week(week_name):
     """Parsing robuste : S36, planning_S36_2026, semaine 36..."""
@@ -306,11 +334,11 @@ def parse_planning(files_data: list):
     all_planning = []
     errors = []
     for filename, content in files_data:
-        engine = get_excel_engine(filename)
-        try:
-            xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
-        except Exception as e:
-            errors.append(f"{filename}: lecture impossible ({e})")
+        if os.path.basename(filename).startswith('~$'):
+            continue  # fichier temporaire Excel, on l'ignore
+        xls, err = read_excel_robust(content, filename)
+        if xls is None:
+            errors.append(err)
             continue
         df = None
         if "Tout (WFO+WFH)" in xls.sheet_names:
@@ -350,8 +378,11 @@ def parse_planning(files_data: list):
 
 def parse_liste_visite(filename: str, content: bytes):
     try:
-        engine = get_excel_engine(filename)
-        df = pd.read_excel(io.BytesIO(content), engine=engine)
+        xls, err = read_excel_robust(content, filename)
+        if xls is None:
+            print("ERREUR lecture liste visite:", err)
+            return None
+        df = xls.parse(sheet_name=xls.sheet_names[0])
         cols_cleaned = [str(c).strip().upper() for c in df.columns]
         df.columns = cols_cleaned
 
@@ -425,8 +456,10 @@ def parse_liste_visite(filename: str, content: bytes):
         return None
 
 def parse_rta_file(filename: str, content: bytes):
-    engine = get_excel_engine(filename)
-    xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+    xls, err = read_excel_robust(content, filename)
+    if xls is None:
+        print("ERREUR lecture RTA:", err)
+        return None
     sheet_name = "Suivi" if "Suivi" in xls.sheet_names else (xls.sheet_names[0] if xls.sheet_names else None)
     if not sheet_name: return None
     df = xls.parse(sheet_name=sheet_name)
@@ -459,8 +492,10 @@ def parse_rta_file(filename: str, content: bytes):
 # ★ Import du planning généré exporté de l'ancien outil
 def parse_generated_legacy(filename: str, content: bytes):
     try:
-        engine = get_excel_engine(filename)
-        xls = pd.ExcelFile(io.BytesIO(content), engine=engine)
+        xls, err = read_excel_robust(content, filename)
+        if xls is None:
+            print("ERREUR lecture legacy:", err)
+            return None
         sheet_name = xls.sheet_names[0] if xls.sheet_names else None
         if not sheet_name: return None
         df = xls.parse(sheet_name=sheet_name)
