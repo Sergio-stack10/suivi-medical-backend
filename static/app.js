@@ -334,7 +334,7 @@ function updateWeekDates() {
 }
 
 async function generatePlanning() {
-    saveGenConfig(); // ★ sauvegarde avant génération
+    saveGenConfig();
     const week = document.getElementById('week_select').value;
     const statusMsg = document.getElementById('p3_status');
     const cards = document.querySelectorAll('.day-card');
@@ -356,11 +356,20 @@ async function generatePlanning() {
         const formData = new FormData();
         formData.append('config', JSON.stringify(config));
         const res = await fetch('/api/generate', { method: 'POST', body: formData });
+        // ★ Si le serveur renvoie une erreur HTTP, on affiche son contenu réel
+        if (!res.ok) {
+            const txt = await res.text();
+            throw new Error("Serveur " + res.status + " : " + txt.slice(0, 300));
+        }
         const result = await res.json();
-        statusMsg.innerText = result.message;
+        statusMsg.innerText = result.message || JSON.stringify(result).slice(0, 200);
         clearCache(['p4']);
         loadGenerated();
-    } catch (e) { statusMsg.innerText = "❌ Erreur."; }
+    } catch (e) {
+        // ★ On affiche l'erreur RÉELLE au lieu de "❌ Erreur."
+        statusMsg.innerText = "❌ Erreur : " + (e.message || e);
+        console.error("Erreur génération complète :", e);
+    }
 }
 
 async function unplanAll() {
