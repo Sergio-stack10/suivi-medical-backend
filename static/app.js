@@ -1,6 +1,6 @@
 let deleteTarget = null;
 let pageCache = {};
-let dashboardData = null; // Stocke les données du dashboard pour le filtre local
+let dashboardData = null;
 
 // ==========================================
 // CACHE MANAGEMENT
@@ -73,8 +73,10 @@ function switchPage(pageId, element) {
 
     if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
     if (pageId === 'p2') loadCollab();
-    if (pageId === 'p3') { loadWeeks(); loadGenerated(); pageCache.p4 = true; }
-    if (pageId === 'p4' && !pageCache.p4) { loadGenerated(); pageCache.p4 = true; }
+    // Page 3 : charger les semaines, puis le planning généré (outil Génération uniquement, semaine choisie)
+    if (pageId === 'p3') { loadWeeks().then(() => loadGeneratedWeek()); pageCache.p4 = true; }
+    // Page 4 : vue complète (Génération + Suivi RTA)
+    if (pageId === 'p4') loadGenerated();
     if (pageId === 'p5') loadSuivi();
     if (pageId === 'p6' && !pageCache.p6) { loadNonEffectuees(); pageCache.p6 = true; }
     if (pageId === 'p7') loadDashboard();
@@ -101,8 +103,12 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
         alert(result.message);
 
         if (deleteTarget === 'planning') { renderDynamicTable([], 'p1_table_body'); clearCache(['p1', 'p3', 'p4']); }
-        if (deleteTarget === 'collab') { renderDynamicTable([], 'p2_table_body'); clearCache(['p2', 'p3', 'p4']); }
-        if (deleteTarget === 'suivi') { renderDynamicTable([], 'p5_table_body'); clearCache(['p5', 'p6', 'p7']); loadGenerated(); }
+        if (deleteTarget === 'collab') { renderDynamicTable([], 'p2_table_body'); clearCache(['p2', 'p3', 'p4']); loadGenerated(); loadGeneratedWeek(); }
+        if (deleteTarget === 'suivi') {
+            renderDynamicTable([], 'p5_table_body');
+            clearCache(['p5', 'p6', 'p7']);
+            loadGenerated(); loadGeneratedWeek();
+        }
         if (deleteTarget === 'non_effectuees') { renderDynamicTable([], 'p6_table_body'); clearCache(['p6']); }
 
         closeModal();
@@ -153,16 +159,18 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         statusMsg.innerText = result.message;
         if (result.data) renderDynamicTable(result.data, tbodyId);
 
-        // ★ Rafraîchissement automatique selon le type d'import
         if (category === 'planning') {
             clearCache(['p1', 'p3', 'p4']);
             await loadWeeksDropdown();
         }
         if (category === 'collab') { clearCache(['p2', 'p3', 'p4']); loadCollab(); }
-        if (category === 'suivi') { clearCache(['p5', 'p6', 'p7']); loadSuivi(); loadGenerated(); }
+        if (category === 'suivi') {
+            clearCache(['p5', 'p6', 'p7']);
+            loadSuivi(); loadGenerated(); loadGeneratedWeek();
+        }
         if (category === 'legacy' || category === 'generated_planning') {
             clearCache(['p3', 'p4']);
-            loadGenerated();
+            loadGenerated(); loadGeneratedWeek();
         }
     } catch (error) {
         statusMsg.innerText = "❌ Erreur : " + (error.message || error);
@@ -226,7 +234,7 @@ async function loadSelectedPlanning() {
 }
 
 // ==========================================
-// PAGES 2 & 5 : RECHARGEMENT DEPUIS LE SERVEUR (persistance)
+// PAGES 2 & 5 : RECHARGEMENT DEPUIS LE SERVEUR
 // ==========================================
 async function loadCollab() {
     const tbody = document.getElementById('p2_table_body');
@@ -249,7 +257,7 @@ async function loadSuivi() {
 }
 
 // ==========================================
-// PAGE 3 : GÉNÉRATION (avec persistance de la config)
+// PAGE 3 : GÉNÉRATION
 // ==========================================
 async function loadWeeks() {
     try {
@@ -257,7 +265,11 @@ async function loadWeeks() {
         const data = await res.json();
         const select = document.getElementById('week_select');
         select.innerHTML = '';
-        if (data.weeks.length === 0) { select.innerHTML = '<option>Aucune semaine</option>'; return; }
+        if (data.weeks.length === 0) {
+            select.innerHTML = '<option>Aucune semaine</option>';
+            updateWeekDates();
+            return;
+        }
         data.weeks.forEach(week => {
             const option = document.createElement('option');
             option.value = week.name; option.innerText = week.name;
@@ -271,11 +283,12 @@ async function loadWeeks() {
             const opt = Array.from(select.options).find(o => o.value === saved.week);
             if (opt) select.value = saved.week;
         }
+        // Changement de semaine -> met à jour les dates ET le tableau des planifiés de la semaine
+        select.onchange = function () { updateWeekDates(); loadGeneratedWeek(); };
         updateWeekDates();
     } catch (e) { console.error('Err loadWeeks:', e); }
 }
 
-// Sauvegarde locale du formulaire de génération (persiste au refresh)
 function saveGenConfig() {
     const week = document.getElementById('week_select').value;
     if (!week || week === 'Aucune semaine') return;
@@ -334,8 +347,8 @@ function updateWeekDates() {
         if (cfg && !cfg.actif) card.classList.add('disabled');
         daysGrid.appendChild(card);
     }
-    daysGrid.addEventListener('input', saveGenConfig);
-    daysGrid.addEventListener('change', saveGenConfig);
+    daysGrid.oninput = saveGenConfig;
+    daysGrid.onchange = saveGenConfig;
     saveGenConfig();
 }
 
@@ -370,6 +383,7 @@ async function generatePlanning() {
         statusMsg.innerText = result.message || JSON.stringify(result).slice(0, 200);
         clearCache(['p4']);
         loadGenerated();
+        loadGeneratedWeek();
     } catch (e) {
         statusMsg.innerText = "❌ Erreur : " + (e.message || e);
         console.error("Erreur génération complète :", e);
@@ -377,15 +391,39 @@ async function generatePlanning() {
 }
 
 // ==========================================
-// PAGES 3 & 4 : PLANNING GÉNÉRÉ
+// PAGES 3 & 4 : PLANNING GÉNÉRÉ (vue fusionnée persistée)
 // ==========================================
+// Page 4 : vue COMPLÈTE = planifiés Génération + lignes 'Planifié' du fichier Suivi RTA
 async function loadGenerated() {
+    const tbody = document.getElementById('p4_table_body');
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     try {
         const res = await fetch('/api/generated');
+        if (!res.ok) throw new Error("Serveur " + res.status);
+        const result = await res.json();
+        renderDynamicTable(result.data, 'p4_table_body');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td class="empty-msg">❌ Erreur de chargement : ' + (e.message || e) + '</td></tr>';
+        console.error('Err loadGenerated:', e);
+    }
+}
+
+// Page 3 : uniquement les plannings de l'outil Génération, filtrés sur la semaine choisie
+async function loadGeneratedWeek() {
+    const tbody = document.getElementById('p3_table_body');
+    const week = document.getElementById('week_select').value;
+    let url = '/api/generated?source=generated';
+    if (week && week !== 'Aucune semaine') url += `&week=${encodeURIComponent(week)}`;
+    tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Serveur " + res.status);
         const result = await res.json();
         renderDynamicTable(result.data, 'p3_table_body');
-        renderDynamicTable(result.data, 'p4_table_body');
-    } catch (e) { console.error('Err loadGenerated:', e); }
+    } catch (e) {
+        tbody.innerHTML = '<tr><td class="empty-msg">❌ Erreur de chargement : ' + (e.message || e) + '</td></tr>';
+        console.error('Err loadGeneratedWeek:', e);
+    }
 }
 
 async function unplanAll() {
@@ -393,6 +431,7 @@ async function unplanAll() {
         await fetch('/api/unplan', { method: 'POST' });
         clearCache(['p3', 'p4', 'p7']);
         loadGenerated();
+        loadGeneratedWeek();
         alert("Planifications effacées.");
     }
 }
@@ -452,11 +491,9 @@ async function loadDashboard() {
         renderDynamicTable(dashboardData.top5 || [], 'p7_top5_body');
         renderDynamicTable(dashboardData.done_visites || [], 'p7_done_body');
 
-        // Chart 1
         populateProjFilter();
         filterChart1();
 
-        // Chart 2
         const c2 = dashboardData.charts.chart2 || [];
         if (c2.length > 0) {
             const max2 = Math.max(...c2.map(d => d.planifie));
@@ -469,7 +506,6 @@ async function loadDashboard() {
             Plotly.newPlot(chart2Div, [t1, t2], layout2);
         } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // Chart 3
         const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
         if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
             const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
