@@ -87,6 +87,25 @@ function switchPage(pageId, element) {
 // ==========================================
 function showDeleteModal(category) {
     deleteTarget = category;
+    // Textes personnalisés selon la cible
+    const texts = {
+        'all_generated': {
+            title: 'Supprimer tous les plannings',
+            text: 'Cette action supprime TOUTES les planifications : celles générées par l\'outil ET celles issues du fichier Suivi. Voulez-vous continuer ?',
+            btn: 'Tout supprimer'
+        }
+    };
+    const t = texts[category];
+    if (t) {
+        document.querySelector('.modal-title').innerText = t.title;
+        document.getElementById('modalText').innerText = t.text;
+        document.getElementById('modalConfirmBtn').innerText = t.btn;
+    } else {
+        // Valeurs par défaut pour les autres catégories
+        document.querySelector('.modal-title').innerText = 'Confirmer la suppression';
+        document.getElementById('modalText').innerText = 'Voulez-vous vraiment supprimer ces données ?';
+        document.getElementById('modalConfirmBtn').innerText = 'Supprimer';
+    }
     document.getElementById('confirmModal').classList.add('show');
 }
 
@@ -98,6 +117,18 @@ function closeModal() {
 document.getElementById('modalConfirmBtn').addEventListener('click', async () => {
     if (!deleteTarget) return;
     try {
+        // Cas spécial : suppression de TOUS les plannings (générés + Suivi)
+        if (deleteTarget === 'all_generated') {
+            const res = await fetch('/api/unplan_all', { method: 'POST' });
+            const result = await res.json();
+            alert(result.message);
+            clearCache(['p3', 'p4', 'p6', 'p7']);
+            loadGenerated();
+            loadGeneratedWeek();
+            closeModal();
+            return;
+        }
+        // Cas général (planning, collab, suivi, non_effectuees)
         const res = await fetch(`/api/delete/${deleteTarget}`, { method: 'DELETE' });
         const result = await res.json();
         alert(result.message);
@@ -427,12 +458,12 @@ async function loadGeneratedWeek() {
 }
 
 async function unplanAll() {
-    if (confirm('Voulez-vous vraiment effacer TOUTES les planifications ?')) {
+    if (confirm('Effacer UNIQUEMENT les planifications générées par l\'outil ?\n\n(Les lignes \'Planifié\' du fichier Suivi RTA ne sont pas touchées)')) {
         await fetch('/api/unplan', { method: 'POST' });
         clearCache(['p3', 'p4', 'p7']);
         loadGenerated();
         loadGeneratedWeek();
-        alert("Planifications effacées.");
+        alert("Planifications générées effacées.");
     }
 }
 
