@@ -115,7 +115,7 @@ function switchPage(pageId, element) {
     if (pageId === 'p3') { loadWeeks().then(() => loadGeneratedWeek()); pageCache.p4 = true; }
     if (pageId === 'p4') loadGenerated();
     if (pageId === 'p5') loadSuivi();
-    if (pageId === 'p6' && !pageCache.p6) { loadNonEffectuees(); pageCache.p6 = true; }
+    if (pageId === 'p6') loadNonEffectuees();
     if (pageId === 'p7') loadDashboard();
 }
 
@@ -234,6 +234,10 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         if (category === 'suivi') {
             clearCache(['p5', 'p6', 'p7']);
             loadSuivi(); loadGenerated(); loadGeneratedWeek();
+            loadNonEffectuees();
+            // Si l'utilisateur regarde le Dashboard pendant l'import -> rafraîchir aussi
+            const p7 = document.getElementById('page-p7');
+            if (p7 && p7.classList.contains('active')) loadDashboard();
         }
         if (category === 'legacy' || category === 'generated_planning') {
             clearCache(['p3', 'p4']);
