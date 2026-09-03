@@ -3,6 +3,30 @@ let pageCache = {};
 let dashboardData = null;
 
 // ==========================================
+// GESTION DU RÔLE
+// ==========================================
+function roleHeaders() {
+    return { 'X-User-Role': localStorage.getItem('role') || 'viewer' };
+}
+
+function applyRoleUI() {
+    const role = localStorage.getItem('role') || 'viewer';
+    const isViewer = role !== 'admin';
+    // Masquer les onglets réservés aux admins
+    ['p1', 'p3', 'p4', 'p5'].forEach(pid => {
+        const tab = document.getElementById('tab-' + pid);
+        if (tab) tab.style.display = isViewer ? 'none' : '';
+    });
+    // Masquer la sidebar d'imports et le bouton menu
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) sidebar.style.display = isViewer ? 'none' : '';
+    const mt = document.querySelector('.menu-toggle');
+    if (mt) mt.style.display = isViewer ? 'none' : '';
+    // Masquer les boutons de suppression
+    document.querySelectorAll('.btn-icon.danger').forEach(b => b.style.display = isViewer ? 'none' : '');
+}
+
+// ==========================================
 // CACHE MANAGEMENT
 // ==========================================
 function clearCache(keys) {
@@ -14,7 +38,7 @@ function clearCache(keys) {
 }
 
 // ==========================================
-// AUTH
+// AUTH (validation côté serveur)
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('isLoggedIn') === 'true') {
@@ -23,25 +47,41 @@ window.addEventListener('DOMContentLoaded', () => {
         const user = localStorage.getItem('username') || 'Admin';
         document.getElementById('userInfo').innerText = user;
         document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
-        const activeTab = document.querySelector('.top-tab.active');
-        if (activeTab) { switchPage('p1', activeTab); }
+        applyRoleUI();
+        const startPage = localStorage.getItem('role') === 'admin' ? 'p1' : 'p2';
+        const tab = document.getElementById('tab-' + startPage);
+        if (tab) switchPage(startPage, tab);
     }
 });
 
-function handleLogin() {
-    const user = document.getElementById('loginUser').value;
+async function handleLogin() {
+    const user = document.getElementById('loginUser').value.trim();
     const pass = document.getElementById('loginPass').value;
-    if ((user === 'wfm_admin' && pass === 'WFM2026') || (user === 'cnx_viewer' && pass === 'Visite2026')) {
+    const errEl = document.getElementById('authError');
+    errEl.style.display = 'none';
+    try {
+        const fd = new FormData();
+        fd.append('username', user);
+        fd.append('password', pass);
+        const res = await fetch('/api/login', { method: 'POST', body: fd });
+        if (!res.ok) { errEl.style.display = 'block'; return; }
+        const data = await res.json();
+
+        localStorage.setItem('isLoggedIn', 'true');
+        localStorage.setItem('username', data.username);
+        localStorage.setItem('role', data.role);
+
         document.getElementById('authOverlay').classList.remove('show');
         document.getElementById('appContainer').classList.add('show');
-        document.getElementById('userInfo').innerText = user;
-        document.getElementById('userAvatar').innerText = user.charAt(0).toUpperCase();
-        localStorage.setItem('isLoggedIn', 'true');
-        localStorage.setItem('username', user);
-        const activeTab = document.querySelector('.top-tab.active');
-        if (activeTab) { switchPage('p1', activeTab); }
-    } else {
-        document.getElementById('authError').style.display = 'block';
+        document.getElementById('userInfo').innerText = data.username;
+        document.getElementById('userAvatar').innerText = data.username.charAt(0).toUpperCase();
+
+        applyRoleUI();
+        const startPage = data.role === 'admin' ? 'p1' : 'p2';
+        const tab = document.getElementById('tab-' + startPage);
+        switchPage(startPage, tab);
+    } catch (e) {
+        errEl.style.display = 'block';
     }
 }
 
@@ -50,6 +90,7 @@ function handleLogout() {
     document.getElementById('authOverlay').classList.add('show');
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('username');
+    localStorage.removeItem('role');
     clearCache();
 }
 
@@ -73,9 +114,7 @@ function switchPage(pageId, element) {
 
     if (pageId === 'p1' && !pageCache.p1) { loadWeeksDropdown(); pageCache.p1 = true; }
     if (pageId === 'p2') loadCollab();
-    // Page 3 : charger les semaines, puis le planning généré (outil Génération uniquement, semaine choisie)
     if (pageId === 'p3') { loadWeeks().then(() => loadGeneratedWeek()); pageCache.p4 = true; }
-    // Page 4 : vue complète (Génération + Suivi RTA)
     if (pageId === 'p4') loadGenerated();
     if (pageId === 'p5') loadSuivi();
     if (pageId === 'p6' && !pageCache.p6) { loadNonEffectuees(); pageCache.p6 = true; }
@@ -87,7 +126,6 @@ function switchPage(pageId, element) {
 // ==========================================
 function showDeleteModal(category) {
     deleteTarget = category;
-    // Textes personnalisés selon la cible
     const texts = {
         'all_generated': {
             title: 'Supprimer tous les plannings',
@@ -101,7 +139,6 @@ function showDeleteModal(category) {
         document.getElementById('modalText').innerText = t.text;
         document.getElementById('modalConfirmBtn').innerText = t.btn;
     } else {
-        // Valeurs par défaut pour les autres catégories
         document.querySelector('.modal-title').innerText = 'Confirmer la suppression';
         document.getElementById('modalText').innerText = 'Voulez-vous vraiment supprimer ces données ?';
         document.getElementById('modalConfirmBtn').innerText = 'Supprimer';
@@ -117,9 +154,9 @@ function closeModal() {
 document.getElementById('modalConfirmBtn').addEventListener('click', async () => {
     if (!deleteTarget) return;
     try {
-        // Cas spécial : suppression de TOUS les plannings (générés + Suivi)
         if (deleteTarget === 'all_generated') {
-            const res = await fetch('/api/unplan_all', { method: 'POST' });
+            const res = await fetch('/api/unplan_all', { method: 'POST', headers: roleHeaders() });
+            if (!res.ok) throw new Error((await res.json()).detail || "Erreur serveur");
             const result = await res.json();
             alert(result.message);
             clearCache(['p3', 'p4', 'p6', 'p7']);
@@ -128,8 +165,8 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
             closeModal();
             return;
         }
-        // Cas général (planning, collab, suivi, non_effectuees)
-        const res = await fetch(`/api/delete/${deleteTarget}`, { method: 'DELETE' });
+        const res = await fetch(`/api/delete/${deleteTarget}`, { method: 'DELETE', headers: roleHeaders() });
+        if (!res.ok) throw new Error((await res.json()).detail || "Erreur serveur");
         const result = await res.json();
         alert(result.message);
 
@@ -144,7 +181,7 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
 
         closeModal();
     } catch (e) {
-        alert("Erreur lors de la suppression.");
+        alert("Erreur : " + (e.message || e));
         closeModal();
     }
 });
@@ -181,10 +218,11 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
     tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
 
     try {
-        const response = await fetch('/api/import', { method: 'POST', body: formData });
+        const response = await fetch('/api/import', { method: 'POST', body: formData, headers: roleHeaders() });
         if (!response.ok) {
-            const txt = await response.text();
-            throw new Error("Serveur " + response.status + " : " + txt.slice(0, 300));
+            let detail = "Erreur serveur " + response.status;
+            try { detail = (await response.json()).detail || detail; } catch (e) {}
+            throw new Error(detail);
         }
         const result = await response.json();
         statusMsg.innerText = result.message;
@@ -307,14 +345,12 @@ async function loadWeeks() {
             option.dataset.dates = JSON.stringify(week.dates || []);
             select.appendChild(option);
         });
-        // Restaure la semaine précédemment configurée
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem('genConfig') || 'null'); } catch (e) {}
         if (saved && saved.week) {
             const opt = Array.from(select.options).find(o => o.value === saved.week);
             if (opt) select.value = saved.week;
         }
-        // Changement de semaine -> met à jour les dates ET le tableau des planifiés de la semaine
         select.onchange = function () { updateWeekDates(); loadGeneratedWeek(); };
         updateWeekDates();
     } catch (e) { console.error('Err loadWeeks:', e); }
@@ -405,10 +441,11 @@ async function generatePlanning() {
     try {
         const formData = new FormData();
         formData.append('config', JSON.stringify(config));
-        const res = await fetch('/api/generate', { method: 'POST', body: formData });
+        const res = await fetch('/api/generate', { method: 'POST', body: formData, headers: roleHeaders() });
         if (!res.ok) {
-            const txt = await res.text();
-            throw new Error("Serveur " + res.status + " : " + txt.slice(0, 300));
+            let detail = "Erreur serveur " + res.status;
+            try { detail = (await res.json()).detail || detail; } catch (e) {}
+            throw new Error(detail);
         }
         const result = await res.json();
         statusMsg.innerText = result.message || JSON.stringify(result).slice(0, 200);
@@ -422,9 +459,8 @@ async function generatePlanning() {
 }
 
 // ==========================================
-// PAGES 3 & 4 : PLANNING GÉNÉRÉ (vue fusionnée persistée)
+// PAGES 3 & 4 : PLANNING GÉNÉRÉ
 // ==========================================
-// Page 4 : vue COMPLÈTE = planifiés Génération + lignes 'Planifié' du fichier Suivi RTA
 async function loadGenerated() {
     const tbody = document.getElementById('p4_table_body');
     tbody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
@@ -439,7 +475,6 @@ async function loadGenerated() {
     }
 }
 
-// Page 3 : uniquement les plannings de l'outil Génération, filtrés sur la semaine choisie
 async function loadGeneratedWeek() {
     const tbody = document.getElementById('p3_table_body');
     const week = document.getElementById('week_select').value;
@@ -459,11 +494,18 @@ async function loadGeneratedWeek() {
 
 async function unplanAll() {
     if (confirm('Effacer UNIQUEMENT les planifications générées par l\'outil ?\n\n(Les lignes \'Planifié\' du fichier Suivi RTA ne sont pas touchées)')) {
-        await fetch('/api/unplan', { method: 'POST' });
+        const res = await fetch('/api/unplan', { method: 'POST', headers: roleHeaders() });
+        if (!res.ok) {
+            let detail = "Erreur serveur";
+            try { detail = (await res.json()).detail || detail; } catch (e) {}
+            alert("Erreur : " + detail);
+            return;
+        }
+        const result = await res.json();
         clearCache(['p3', 'p4', 'p7']);
         loadGenerated();
         loadGeneratedWeek();
-        alert("Planifications générées effacées.");
+        alert(result.message);
     }
 }
 
