@@ -12,17 +12,14 @@ function roleHeaders() {
 function applyRoleUI() {
     const role = localStorage.getItem('role') || 'viewer';
     const isViewer = role !== 'admin';
-    // Masquer les onglets réservés aux admins
     ['p1', 'p3', 'p4', 'p5'].forEach(pid => {
         const tab = document.getElementById('tab-' + pid);
         if (tab) tab.style.display = isViewer ? 'none' : '';
     });
-    // Masquer la sidebar d'imports et le bouton menu
     const sidebar = document.getElementById('sidebar');
     if (sidebar) sidebar.style.display = isViewer ? 'none' : '';
     const mt = document.querySelector('.menu-toggle');
     if (mt) mt.style.display = isViewer ? 'none' : '';
-    // Masquer les boutons de suppression
     document.querySelectorAll('.btn-icon.danger').forEach(b => b.style.display = isViewer ? 'none' : '');
 }
 
@@ -526,7 +523,7 @@ async function loadNonEffectuees() {
 }
 
 // ==========================================
-// PAGE 7 : DASHBOARD
+// PAGE 7 : DASHBOARD (avec Chart 4)
 // ==========================================
 async function loadDashboard() {
     const metricsDiv = document.getElementById('p7_metrics');
@@ -536,6 +533,7 @@ async function loadDashboard() {
     const chart1Div = document.getElementById('chart1_div');
     const chart2Div = document.getElementById('chart2_div');
     const chart3Div = document.getElementById('chart3_div');
+    const chart4Div = document.getElementById('chart4_div');
 
     const startDate = document.getElementById('p7_start_date') ? document.getElementById('p7_start_date').value : '';
     const endDate = document.getElementById('p7_end_date') ? document.getElementById('p7_end_date').value : '';
@@ -547,6 +545,7 @@ async function loadDashboard() {
     if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (doneBody) doneBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
+    if (chart4Div) chart4Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Chargement...</p>';
 
     try {
         const res = await fetch(url);
@@ -565,9 +564,11 @@ async function loadDashboard() {
         renderDynamicTable(dashboardData.top5 || [], 'p7_top5_body');
         renderDynamicTable(dashboardData.done_visites || [], 'p7_done_body');
 
+        // Chart 1
         populateProjFilter();
         filterChart1();
 
+        // Chart 2
         const c2 = dashboardData.charts.chart2 || [];
         if (c2.length > 0) {
             const max2 = Math.max(...c2.map(d => d.planifie));
@@ -580,6 +581,7 @@ async function loadDashboard() {
             Plotly.newPlot(chart2Div, [t1, t2], layout2);
         } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
+        // Chart 3
         const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
         if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
             const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
@@ -587,7 +589,7 @@ async function loadDashboard() {
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // Chart 4 : non effectuées par ancienneté
+        // ★ Chart 4 : non effectuées par ancienneté
         populateProj2Filter();
         filterChart4();
 
@@ -612,6 +614,7 @@ function closeProjDropdown() {
     document.querySelectorAll('.multiselect-options').forEach(l => l.classList.remove('show'));
     document.querySelectorAll('.multiselect-box').forEach(b => b.classList.remove('open'));
 }
+
 window.addEventListener('click', function (event) {
     if (!event.target.closest('.multiselect-container')) closeProjDropdown();
 });
@@ -695,7 +698,9 @@ function filterChart1() {
     } else {
         chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>';
     }
-    // ==========================================
+}
+
+// ==========================================
 // GRAPHIQUE 4 : NON EFFECTUÉES PAR ANCIENNETÉ
 // ==========================================
 const CAT_ORDER = ['< 3 mois', '3 à 6 mois', '6 mois à 1 an', '> 1 an', 'Embauche inconnue'];
@@ -771,13 +776,11 @@ function filterChart4() {
         return;
     }
 
-    // Total par catégorie (ordre fixe)
     const byCat = {};
     CAT_ORDER.forEach(c => byCat[c] = 0);
     filtered.forEach(d => { byCat[d.categorie] = (byCat[d.categorie] || 0) + d.count; });
     const cats = CAT_ORDER.filter(c => byCat[c] > 0);
 
-    // Barres empilées par projet
     const projects = [...new Set(filtered.map(d => d.project))].sort();
     const palette = ['#003D5B', '#25E2CC', '#FBCA18', '#FF6B6B', '#747474', '#8e44ad', '#2ecc71', '#e67e22', '#3498db', '#c0392b'];
     const traces = projects.map((proj, i) => ({
@@ -797,5 +800,4 @@ function filterChart4() {
         margin: { t: 40, b: 60 }
     };
     Plotly.newPlot(chart4Div, traces, layout4);
-}
 }
