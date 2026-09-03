@@ -228,6 +228,19 @@ def format_time_display(val):
     if t: return t.strftime('%H:%M')
     return str(val).strip() if not pd.isna(val) and str(val).strip() not in ['nan'] else ""
 
+def parse_heure_robuste(series):
+    """Convertit une colonne d'heures (time objects, texte, datetime) en datetime fiable."""
+    def conv(v):
+        if pd.isna(v): return None
+        if isinstance(v, datetime.time):
+            return datetime.datetime.combine(datetime.date.today(), v)
+        if isinstance(v, (datetime.datetime, pd.Timestamp)): return v
+        s = str(v).strip()
+        if s in ('', 'nan', 'None', 'NaT', '0:00:00'): return None
+        t = pd.to_datetime(s, errors='coerce')
+        return None if pd.isna(t) else t
+    return series.apply(conv)
+
 def calculate_anciennete(hire_date_str):
     try:
         hd = pd.to_datetime(hire_date_str, errors='coerce')
@@ -356,8 +369,16 @@ def enrich_shifts(df_to_enrich, history_plannings):
                     break
         shifts_debut.append(found_debut)
         shifts_fin.append(found_fin)
-    df_to_enrich['Shift Début'] = shifts_debut
-    df_to_enrich['Shift Fin'] = shifts_fin
+    # ★ Préserver les valeurs déjà présentes (ex: shifts importés de l'ancien outil)
+    # On ne remplit que les vides avec le résultat de la recherche dans les plannings
+    if 'Shift Début' in df_to_enrich.columns:
+        old_d = df_to_enrich['Shift Début'].fillna('').astype(str).values
+        old_f = df_to_enrich['Shift Fin'].fillna('').astype(str).values
+        df_to_enrich['Shift Début'] = [nd if not od else od for nd, od in zip(shifts_debut, old_d)]
+        df_to_enrich['Shift Fin'] = [nf if not of_ else of_ for nf, of_ in zip(shifts_fin, old_f)]
+    else:
+        df_to_enrich['Shift Début'] = shifts_debut
+        df_to_enrich['Shift Fin'] = shifts_fin
     return df_to_enrich.drop(columns=['DayOfWeek', 'WeekNum'])
 
 # ==========================================================
@@ -557,7 +578,11 @@ def parse_generated_legacy(filename: str, content: bytes):
 
         if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
         if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
-        if 'Créneau Visite' in df.columns: df['Créneau Visite'] = pd.to_datetime(df['Créneau Visite'], errors='coerce')
+        if 'Créneau Visite' in df.columns: df['Créneau Visite'] = parse_heure_robuste(df['Créneau Visite'])
+        # ★ Shifts du fichier legacy : convertir en texte lisible (Excel donne des time objects)
+        for c in ['Shift Début', 'Shift Fin']:
+            if c in df.columns:
+                df[c] = df[c].apply(format_time_display)
         if 'Statut Visite' not in df.columns: df['Statut Visite'] = 'Non Planifié'
         return df
     except Exception:
@@ -684,7 +709,17 @@ def build_planning_genere(week_name=None, only_generated=False):
 
     if combined.empty:
         return pd.DataFrame(columns=DISPLAY_COLS)
-
+    # ★ Remplissage systématique du Payroll ID depuis la liste médicale
+    med_all = app_state.get('medical_list')
+    if med_all is not None and not med_all.empty:
+        m2 = med_all.copy()
+        m2['WORKDAY ID'] = norm_id_series(m2['WORKDAY ID'])
+        if 'Payroll ID' in m2.columns:
+            pid_full = dict(zip(m2['WORKDAY ID'], m2['Payroll ID'].fillna('').astype(str)))
+            if not combined.empty:
+                cur = combined['Payroll ID'].fillna('').astype(str).str.strip()
+                better = combined['WORKDAY ID'].map(pid_full).fillna('').astype(str).str.strip()
+                combined['Payroll ID'] = [b if not c else c for c, b in zip(cur, better)]
     combined['Date Visite'] = pd.to_datetime(combined['Date Visite'], errors='coerce')
     combined = combined.sort_values(['Date Visite', 'Nom'], na_position='last')
     combined['Date Visite'] = combined['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
