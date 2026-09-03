@@ -835,6 +835,27 @@ async def unplan_all():
         save_history()
     return {"message": "Toutes les planifications ont été effacées."}
 
+@app.post("/api/unplan_all")
+async def unplan_everything():
+    """Supprime TOUTES les planifications : générées par l'outil ET lignes 'Planifié' du Suivi RTA."""
+    # 1) Réinitialiser les planifications générées (liste médicale)
+    med_list = app_state.get('medical_list')
+    if med_list is not None and 'Date Visite' in med_list.columns:
+        mask = med_list['Date Visite'].notna()
+        med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
+        med_list.loc[mask, 'Date Visite'] = pd.NaT
+        med_list.loc[mask, 'Créneau Visite'] = pd.NaT
+        for col in ['Heure Départ', 'Heure Retour']:
+            if col in med_list.columns: med_list.loc[mask, col] = pd.NaT
+        if 'Commentaire' in med_list.columns: med_list.loc[mask, 'Commentaire'] = ''
+        app_state['medical_list'] = med_list
+    # 2) Supprimer les lignes 'Planifié' du fichier Suivi RTA
+    rta = app_state.get('rta_data')
+    if rta is not None and not rta.empty and 'Statut Visite' in rta.columns:
+        app_state['rta_data'] = rta[rta['Statut Visite'].astype(str).str.strip().str.lower() != 'planifié'].copy()
+    save_history()
+    return {"message": "✅ Tous les plannings (générés + Suivi RTA) ont été supprimés."}
+
 # ==========================================================
 # GÉNÉRATION
 # ==========================================================
