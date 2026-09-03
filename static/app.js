@@ -103,6 +103,7 @@ function toggleSidebar() {
         if (document.getElementById('chart1_div')) Plotly.Plots.resize('chart1_div');
         if (document.getElementById('chart2_div')) Plotly.Plots.resize('chart2_div');
         if (document.getElementById('chart3_div')) Plotly.Plots.resize('chart3_div');
+        if (document.getElementById('chart4_div')) Plotly.Plots.resize('chart4_div');
     }, 300);
 }
 
@@ -586,6 +587,10 @@ async function loadDashboard() {
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
+        // Chart 4 : non effectuées par ancienneté
+        populateProj2Filter();
+        filterChart4();
+
     } catch (e) {
         console.error("Err loadDashboard:", e);
         metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Erreur de chargement</h3></div></div>';
@@ -604,12 +609,9 @@ function toggleProjDropdown(event) {
 }
 
 function closeProjDropdown() {
-    const list = document.getElementById("proj_checkbox_list");
-    const box = document.querySelector('.multiselect-box');
-    if (list) list.classList.remove('show');
-    if (box) box.classList.remove('open');
+    document.querySelectorAll('.multiselect-options').forEach(l => l.classList.remove('show'));
+    document.querySelectorAll('.multiselect-box').forEach(b => b.classList.remove('open'));
 }
-
 window.addEventListener('click', function (event) {
     if (!event.target.closest('.multiselect-container')) closeProjDropdown();
 });
@@ -693,4 +695,107 @@ function filterChart1() {
     } else {
         chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>';
     }
+    // ==========================================
+// GRAPHIQUE 4 : NON EFFECTUÉES PAR ANCIENNETÉ
+// ==========================================
+const CAT_ORDER = ['< 3 mois', '3 à 6 mois', '6 mois à 1 an', '> 1 an', 'Embauche inconnue'];
+
+function toggleProj2Dropdown(event) {
+    event.stopPropagation();
+    const list = document.getElementById("proj2_checkbox_list");
+    const box = event.currentTarget;
+    list.classList.toggle("show");
+    box.classList.toggle("open");
+}
+
+function populateProj2Filter() {
+    if (!dashboardData) return;
+    const c4 = dashboardData.chart4 || [];
+    const container = document.getElementById("proj2_checkbox_list");
+    if (!container) return;
+    container.innerHTML = '';
+    const uniqueProjects = [...new Set(c4.map(d => d.project))].sort();
+
+    const allDiv = document.createElement("div");
+    allDiv.innerHTML = `<input type="checkbox" id="proj2_all" checked onchange="onProj2Change()"> <label for="proj2_all" style="margin-left:5px; font-weight:bold;">Tous les projets</label>`;
+    container.appendChild(allDiv);
+
+    uniqueProjects.forEach((p) => {
+        const div = document.createElement("div");
+        div.innerHTML = `<input type="checkbox" class="proj2_item" value="${p}" checked onchange="onProj2Change()"> <label style="margin-left:5px;">${p}</label>`;
+        container.appendChild(div);
+    });
+    updateProj2Label();
+}
+
+function onProj2Change() {
+    const allBox = document.getElementById("proj2_all");
+    const itemBoxes = document.querySelectorAll('.proj2_item');
+    const isAllClicked = event.target.id === "proj2_all";
+    if (isAllClicked) {
+        itemBoxes.forEach(cb => cb.checked = allBox.checked);
+    } else {
+        allBox.checked = Array.from(itemBoxes).every(cb => cb.checked);
+    }
+    updateProj2Label();
+    filterChart4();
+}
+
+function updateProj2Label() {
+    const allBox = document.getElementById("proj2_all");
+    const itemBoxes = document.querySelectorAll('.proj2_item');
+    const checkedCount = Array.from(itemBoxes).filter(cb => cb.checked).length;
+    const label = document.getElementById("proj2_filter_label");
+    if (!label) return;
+    if (allBox && allBox.checked) label.innerText = "Tous les projets";
+    else if (checkedCount === 0) label.innerText = "Aucun projet sélectionné";
+    else label.innerText = `${checkedCount} projet(s) sélectionné(s)`;
+}
+
+function filterChart4() {
+    if (!dashboardData) return;
+    const c4 = dashboardData.chart4 || [];
+    const chart4Div = document.getElementById('chart4_div');
+    if (!chart4Div) return;
+
+    const itemBoxes = document.querySelectorAll('.proj2_item');
+    const selected = Array.from(itemBoxes).filter(cb => cb.checked).map(cb => cb.value);
+    const allBox = document.getElementById("proj2_all");
+
+    const filtered = (allBox && allBox.checked) || selected.length === 0
+        ? c4
+        : c4.filter(d => selected.includes(d.project));
+
+    if (filtered.length === 0) {
+        chart4Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>';
+        return;
+    }
+
+    // Total par catégorie (ordre fixe)
+    const byCat = {};
+    CAT_ORDER.forEach(c => byCat[c] = 0);
+    filtered.forEach(d => { byCat[d.categorie] = (byCat[d.categorie] || 0) + d.count; });
+    const cats = CAT_ORDER.filter(c => byCat[c] > 0);
+
+    // Barres empilées par projet
+    const projects = [...new Set(filtered.map(d => d.project))].sort();
+    const palette = ['#003D5B', '#25E2CC', '#FBCA18', '#FF6B6B', '#747474', '#8e44ad', '#2ecc71', '#e67e22', '#3498db', '#c0392b'];
+    const traces = projects.map((proj, i) => ({
+        x: cats,
+        y: cats.map(c => { const r = filtered.find(d => d.project === proj && d.categorie === c); return r ? r.count : 0; }),
+        type: 'bar', name: proj,
+        marker: { color: palette[i % palette.length] },
+        text: cats.map(c => { const r = filtered.find(d => d.project === proj && d.categorie === c); return r ? r.count : ''; }),
+        textposition: 'inside'
+    }));
+
+    const layout4 = {
+        barmode: 'stack',
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#003D5B' },
+        legend: { title: { text: 'Projet' } },
+        margin: { t: 40, b: 60 }
+    };
+    Plotly.newPlot(chart4Div, traces, layout4);
+}
 }
