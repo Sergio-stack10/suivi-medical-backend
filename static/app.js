@@ -545,7 +545,6 @@ async function loadDashboard() {
     if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (doneBody) doneBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    if (chart4Div) chart4Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Chargement...</p>';
 
     try {
         const res = await fetch(url);
