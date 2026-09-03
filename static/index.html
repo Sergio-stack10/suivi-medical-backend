@@ -236,10 +236,11 @@
                             <label style="font-size: 12px; color: #555; display: block; margin-bottom: 5px;">Filtrer par projet :</label>
                             <div class="multiselect-container">
                                 <div class="multiselect-box" onclick="toggleProjDropdown(event)">
-                                <span id="proj_filter_label">Tous les projets</span>
+                                    <span id="proj_filter_label">Tous les projets</span>
                                     <i class="fas fa-chevron-down"></i>
                                 </div>
-                            <div id="proj_checkbox_list" class="multiselect-options"></div>
+                                <div id="proj_checkbox_list" class="multiselect-options"></div>
+                            </div>
                         </div>
                         <div id="chart1_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
@@ -248,32 +249,27 @@
                         <div class="card-header">2. Planifié vs Effectuée par date</div>
                         <div id="chart2_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
+
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">3. Avancement Global</div>
                         <div id="chart3_div" style="width:100%; min-height:400px; padding: 15px; display: flex; justify-content: center;"></div>
-                                        <div class="card" style="margin-bottom: 20px;">
+                    </div>
+
+                    <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">4. Visites non effectuées par ancienneté</div>
-                        <div style="padding: 15px 15px 0 15px; position: relative;">
-                            <label style="font-size: 12px; color: #555; display: block; margin-bottom: 5px;">Filtrer par projet :</label>
-                            <div class="multiselect-container">
-                                <div class="multiselect-box" onclick="toggleProj2Dropdown(event)">
-                                    <span id="proj2_filter_label">Tous les projets</span>
-                                    <i class="fas fa-chevron-down" style="float: right; margin-top: 5px;"></i>
-                                </div>
-                                <div id="proj2_checkbox_list" class="multiselect-options"></div>
-                            </div>
-                        </div>
                         <div id="chart4_div" style="width:100%; min-height:400px; padding: 15px;"></div>
                     </div>
-                    </div>
+
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">Durée moyenne par jour</div>
                         <div class="table-container"><table id="p7_avg_table"><thead></thead><tbody id="p7_avg_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
+
                     <div class="card" style="margin-bottom: 20px;">
                         <div class="card-header">Top 5 des durées les plus élevées</div>
                         <div class="table-container"><table id="p7_top5_table"><thead></thead><tbody id="p7_top5_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
+
                     <div class="card">
                         <div class="action-bar" style="padding: 15px 25px 0 25px;">
                             <button class="btn-icon export" onclick="exportData('done_visites')"><i class="fas fa-file-excel"></i> Exporter la liste</button>
@@ -282,9 +278,6 @@
                         <div class="table-container"><table id="p7_done_table"><thead></thead><tbody id="p7_done_body"><tr><td class="empty-msg">Chargement...</td></tr></tbody></table></div>
                     </div>
                 </div>
-
-            </main>
-        </div>
         
         <!-- Signature -->
         <div class="footer-fix"><span style="color: #FFFFFF;">Developed by</span> <span style="color: #25E2CC; font-weight: 700;">TEAM TMM 🦄</span></div>
