@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +31,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
 app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None, 'non_effectuees': pd.DataFrame()}
+# ==========================================================
+# AUTHENTIFICATION & RÔLES
+# ==========================================================
+ADMIN_USERS = {"wfm_admin": "WFM2026"}
+VIEWER_USERS = {"cnx_viewer": "Visite2026", "concentrix": "Visite2026"}
+
+def require_admin(request: Request):
+    """Refuse les actions de modification aux comptes de consultation."""
+    if request.headers.get("X-User-Role", "") != "admin":
+        raise HTTPException(status_code=403, detail="🔒 Action réservée aux administrateurs.")
 
 # ==========================================================
 # PERSISTANCE (MongoDB + fallback fichier local)
@@ -93,6 +103,15 @@ async def health():
     if client is None:
         return {"mongo": "❌ NON CONNECTÉ — les données seront perdues à chaque redéploiement", "mode": "fichier local éphémère"}
     return {"mongo": "✅ Connecté — persistance garantie", "mode": "MongoDB"}
+
+@app.post("/api/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if username in ADMIN_USERS and password == ADMIN_USERS[username]:
+        return {"role": "admin", "username": username}
+    if username in VIEWER_USERS and password == VIEWER_USERS[username]:
+        return {"role": "viewer", "username": username}
+    raise HTTPException(status_code=401, detail="Identifiants incorrects")
+
 
 # ==========================================================
 # LECTURE EXCEL ROBUSTE (multi-moteurs + diagnostic)
@@ -680,8 +699,9 @@ def build_planning_genere(week_name=None, only_generated=False):
 # IMPORT
 # ==========================================================
 @app.post("/api/import")
-async def import_files(files: List[UploadFile] = File(...), category: str = Form(...), week_name: str = Form(None)):
+async def import_files(request: Request, files: List[UploadFile] = File(...), category: str = Form(...), week_name: str = Form(None)):
     try:
+        require_admin(request)
         files_data = []
         for f in files:
             content = await f.read()
@@ -784,7 +804,8 @@ async def get_planning(week_name: str):
     return {"data": clean_for_json(display_df[cols_to_show])}
 
 @app.delete("/api/delete/{category}")
-async def delete_data(category: str):
+async def delete_data(request: Request, category: str):
+    require_admin(request)
     if category == 'planning': app_state['plannings'] = {}
     elif category == 'collab': app_state['medical_list'] = None
     elif category == 'suivi': app_state['rta_data'] = None
@@ -839,7 +860,8 @@ async def get_generated(week: str = None, source: str = None):
         return {"data": []}
 
 @app.post("/api/unplan")
-async def unplan_all():
+async def unplan_all(request: Request):
+    require_admin(request)
     med_list = app_state.get('medical_list')
     if med_list is None:
         return {"message": "Aucune donnée à effacer."}
@@ -858,9 +880,8 @@ async def unplan_all():
     return {"message": f"✅ {n} planification(s) générée(s) effacée(s). Les planifications importées et celles du Suivi sont conservées."}
 
 @app.post("/api/unplan_all")
-async def unplan_everything():
-    """Supprime TOUTES les planifications : générées par l'outil ET lignes 'Planifié' du Suivi RTA."""
-    # 1) Réinitialiser les planifications générées (liste médicale)
+async def unplan_everything(request: Request):
+    require_admin(request)
     med_list = app_state.get('medical_list')
     if med_list is not None and 'Date Visite' in med_list.columns:
         mask = med_list['Statut Visite'].astype(str).str.strip() == 'Planifié'
@@ -882,8 +903,9 @@ async def unplan_everything():
 # GÉNÉRATION
 # ==========================================================
 @app.post("/api/generate")
-async def generate_planning(config: str = Form(...)):
+async def generate_planning(request: Request, config: str = Form(...)):
     try:
+        require_admin(request)
         config = json.loads(config)
         medical_list = app_state['medical_list'].copy()
         current_week = config['week']
