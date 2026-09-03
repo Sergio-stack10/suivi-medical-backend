@@ -274,6 +274,15 @@ def norm_id(val):
 def norm_id_series(s):
     return s.astype(str).str.replace(" ", "", regex=False).str.replace(r"\.0$", "", regex=True).str.upper()
 
+def ensure_source_col(med_list):
+    """Garantit la colonne Source Planification.
+    Les données préexistantes sans tag sont considérées comme 'Import' (préservées)."""
+    if 'Source Planification' not in med_list.columns:
+        med_list['Source Planification'] = ''
+        mask_p = med_list['Statut Visite'].astype(str).str.strip() == 'Planifié'
+        med_list.loc[mask_p, 'Source Planification'] = 'Import'
+    return med_list
+
 def sync_statut_with_plannings(medical_list, history_plannings):
     if medical_list is None or medical_list.empty: return medical_list
     all_plannings = []
@@ -451,8 +460,9 @@ def parse_liste_visite(filename: str, content: bytes):
         df['Heure Départ'] = pd.NaT
         df['Heure Retour'] = pd.NaT
         df['Commentaire'] = ''
+        df['Source Planification'] = ''        
 
-        final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Heure Départ', 'Heure Retour', 'Commentaire']
+        final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Heure Départ', 'Heure Retour', 'Commentaire', 'Source Planification']
         return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
     except Exception:
         print("ERREUR parse_liste_visite:", traceback.format_exc())
@@ -572,6 +582,10 @@ def import_generated_to_medical(df):
         med_list['Créneau Visite'] = pd.to_datetime(med_list['Créneau Visite'], errors='coerce')
     if 'Date d\'embauche' in med_list.columns:
         med_list['Date d\'embauche'] = pd.to_datetime(med_list['Date d\'embauche'], errors='coerce')
+    # ★ Marquer les planifications importées pour les protéger du bouton "Effacer"
+    med_list = ensure_source_col(med_list)
+    imported_ids = set(df['WORKDAY ID'])
+    med_list.loc[med_list['WORKDAY ID'].isin(imported_ids), 'Source Planification'] = 'Import'
     return med_list
 
 # ==========================================================
@@ -596,6 +610,10 @@ def build_planning_genere(week_name=None, only_generated=False):
     med = app_state.get('medical_list')
     if med is not None and not med.empty and 'Statut Visite' in med.columns:
         m = med.copy()
+        m = ensure_source_col(m)
+        # Page Génération : uniquement les planifications générées par l'outil
+        if only_generated:
+            m = m[m['Source Planification'].astype(str) == 'Génération']
         m['WORKDAY ID'] = norm_id_series(m['WORKDAY ID'])
         m['Date Visite'] = pd.to_datetime(m.get('Date Visite'), errors='coerce')
         mask_m = (m['Statut Visite'].astype(str).str.strip() == 'Planifié') & m['Date Visite'].notna()
@@ -823,17 +841,21 @@ async def get_generated(week: str = None, source: str = None):
 @app.post("/api/unplan")
 async def unplan_all():
     med_list = app_state.get('medical_list')
-    if med_list is not None:
-        mask = med_list['Date Visite'].notna()
-        med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
-        med_list.loc[mask, 'Date Visite'] = pd.NaT
-        med_list.loc[mask, 'Créneau Visite'] = pd.NaT
-        for col in ['Heure Départ', 'Heure Retour']:
-            if col in med_list.columns: med_list.loc[mask, col] = pd.NaT
-        if 'Commentaire' in med_list.columns: med_list.loc[mask, 'Commentaire'] = ''
-        app_state['medical_list'] = med_list
-        save_history()
-    return {"message": "Toutes les planifications ont été effacées."}
+    if med_list is None:
+        return {"message": "Aucune donnée à effacer."}
+    med_list = ensure_source_col(med_list.copy())
+    # ★ N'efface QUE les planifications générées par l'outil (source 'Génération')
+    mask = (med_list['Date Visite'].notna()) & (med_list['Source Planification'].astype(str) == 'Génération')
+    n = int(mask.sum())
+    med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
+    med_list.loc[mask, 'Date Visite'] = pd.NaT
+    med_list.loc[mask, 'Créneau Visite'] = pd.NaT
+    for col in ['Heure Départ', 'Heure Retour']:
+        if col in med_list.columns: med_list.loc[mask, col] = pd.NaT
+    if 'Commentaire' in med_list.columns: med_list.loc[mask, 'Commentaire'] = ''
+    app_state['medical_list'] = med_list
+    save_history()
+    return {"message": f"✅ {n} planification(s) générée(s) effacée(s). Les planifications importées et celles du Suivi sont conservées."}
 
 @app.post("/api/unplan_all")
 async def unplan_everything():
@@ -841,7 +863,7 @@ async def unplan_everything():
     # 1) Réinitialiser les planifications générées (liste médicale)
     med_list = app_state.get('medical_list')
     if med_list is not None and 'Date Visite' in med_list.columns:
-        mask = med_list['Date Visite'].notna()
+        mask = med_list['Statut Visite'].astype(str).str.strip() == 'Planifié'
         med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
         med_list.loc[mask, 'Date Visite'] = pd.NaT
         med_list.loc[mask, 'Créneau Visite'] = pd.NaT
@@ -880,6 +902,12 @@ async def generate_planning(config: str = Form(...)):
             if col not in medical_list.columns:
                 medical_list[col] = default
         medical_list['Ancienneté_num'] = pd.to_numeric(medical_list['Ancienneté_num'], errors='coerce').fillna(0)
+        for col, default in [('Statut Visite', 'Non Planifié'), ('Date Visite', pd.NaT), ('Créneau Visite', pd.NaT),
+                             ('Shift Début', ''), ('Shift Fin', ''), ('Heure Départ', pd.NaT), ('Heure Retour', pd.NaT),
+                             ('Commentaire', ''), ('Source Planification', '')]:
+            if col not in medical_list.columns:
+                medical_list[col] = default
+        medical_list = ensure_source_col(medical_list)        
 
         # Normalisation des IDs en TEXTE
         current_planning = current_planning.copy()
@@ -996,6 +1024,7 @@ async def generate_planning(config: str = Form(...)):
                         row_mask = medical_list['Payroll ID'].astype(str).str.replace(" ", "", regex=False).str.upper() == pid
                     if row_mask.any():
                         medical_list.loc[row_mask, 'Statut Visite'] = 'Planifié'
+                        medical_list.loc[row_mask, 'Source Planification'] = 'Génération'
                         medical_list.loc[row_mask, 'Date Visite'] = pd.to_datetime(date_obj)
                         medical_list.loc[row_mask, 'Créneau Visite'] = pd.to_datetime(datetime.datetime.combine(date_obj, assigned))
                         cs = medical_list.loc[row_mask, 'Commentaire']
