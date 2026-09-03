@@ -32,6 +32,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
 app_state = {'plannings': {}, 'medical_list': None, 'rta_data': None, 'non_effectuees': pd.DataFrame()}
 
+# ==========================================================
+# PERSISTANCE (MongoDB + fallback fichier local)
+# ==========================================================
 def get_mongo_client():
     mongo_uri = os.environ.get("MONGO_URI")
     if not mongo_uri: return None
@@ -91,8 +94,10 @@ async def health():
         return {"mongo": "❌ NON CONNECTÉ — les données seront perdues à chaque redéploiement", "mode": "fichier local éphémère"}
     return {"mongo": "✅ Connecté — persistance garantie", "mode": "MongoDB"}
 
+# ==========================================================
+# LECTURE EXCEL ROBUSTE (multi-moteurs + diagnostic)
+# ==========================================================
 def get_excel_engine(filename: str):
-    """Choisit le moteur le plus rapide réellement disponible."""
     try:
         parts = pd.__version__.split(".")
         major = int(parts[0])
@@ -105,18 +110,16 @@ def get_excel_engine(filename: str):
     if filename.endswith(".xlsb"): return "pyxlsb"
     if filename.endswith(".xls"): return "xlrd"
     return "openpyxl"
+
 def read_excel_robust(content: bytes, filename: str):
-    """★ Ouvre un fichier Excel en essayant plusieurs moteurs + diagnostic clair."""
+    """Ouvre un fichier Excel en essayant plusieurs moteurs + diagnostic clair."""
     if not content or len(content) < 8:
         return None, f"{filename}: fichier vide ou tronqué ({len(content) if content else 0} octets)"
-
-    # Signature des premiers octets -> dit ce que le fichier est RÉELLEMENT
     head = content[:8]
     if head[:4] == b'PK\x03\x04': sig = "ZIP (xlsx/xlsb moderne)"
     elif head[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': sig = "OLE2 (xls ancien ou chiffré)"
     elif head[:5] == b'<?xml' or head[:2] == b'< ': sig = "XML/HTML (PAS un vrai Excel)"
     else: sig = "inconnue"
-
     ext = '.' + filename.lower().split('.')[-1] if '.' in filename else ''
     engines = {
         '.xlsb': ['calamine', 'pyxlsb', 'openpyxl'],
@@ -124,7 +127,6 @@ def read_excel_robust(content: bytes, filename: str):
         '.xlsx': ['calamine', 'openpyxl'],
         '.xlsm': ['calamine', 'openpyxl'],
     }.get(ext, ['calamine', 'openpyxl', 'pyxlsb'])
-
     errors = []
     for engine in engines:
         try:
@@ -134,13 +136,15 @@ def read_excel_robust(content: bytes, filename: str):
             errors.append(f"{engine}: {e}")
     return None, f"{filename}: illisible (signature={sig} | " + " | ".join(errors) + ")"
 
+# ==========================================================
+# UTILITAIRES
+# ==========================================================
 def get_dates_from_week(week_name):
     """Parsing robuste : S36, planning_S36_2026, semaine 36..."""
     name = str(week_name)
     year = datetime.date.today().year
     y = re.search(r'\b(20\d{2})\b', name)
     if y: year = int(y.group(1))
-
     week_num = None
     m = re.search(r'\b[Ss](\d{1,2})\b', name)
     if m:
@@ -153,7 +157,6 @@ def get_dates_from_week(week_name):
             for n in re.findall(r'\d+', name):
                 if 1 <= int(n) <= 53:
                     week_num = int(n); break
-
     if week_num:
         try:
             monday = datetime.date.fromisocalendar(year, week_num, 1)
@@ -265,7 +268,7 @@ def format_duration(mins):
     return f"{h}h {m}min" if h > 0 else f"{m}min"
 
 def norm_id(val):
-    """★ Normalise un WORKDAY ID en TEXTE (comme l'ancien outil Streamlit)."""
+    """Normalise un WORKDAY ID en TEXTE (comme l'ancien outil Streamlit)."""
     return str(val).replace(" ", "").replace(".0", "").upper()
 
 def norm_id_series(s):
@@ -294,8 +297,8 @@ def sync_statut_with_plannings(medical_list, history_plannings):
     medical_list['Statut'] = medical_list['Statut'].apply(lambda x: 'CC' if 'ADVISOR' in str(x).upper() or 'CUSTOMER SERVICE' in str(x).upper() or 'CC' in str(x).upper() else 'ENC')
     return medical_list
 
-# ★ PORTAGE STREAMLIT : retrouve Shift Début/Fin d'une personne dans les plannings importés
 def enrich_shifts(df_to_enrich, history_plannings):
+    """Retrouve Shift Début/Fin d'une personne dans les plannings importés."""
     if df_to_enrich is None or df_to_enrich.empty:
         return df_to_enrich
     df_to_enrich = df_to_enrich.copy()
@@ -329,13 +332,15 @@ def enrich_shifts(df_to_enrich, history_plannings):
     df_to_enrich['Shift Fin'] = shifts_fin
     return df_to_enrich.drop(columns=['DayOfWeek', 'WeekNum'])
 
-# ★ VERSION AVEC ERREURS EXPLICITES (retourne (df, errors))
+# ==========================================================
+# PARSERS
+# ==========================================================
 def parse_planning(files_data: list):
     all_planning = []
     errors = []
     for filename, content in files_data:
         if os.path.basename(filename).startswith('~$'):
-            continue  # fichier temporaire Excel, on l'ignore
+            continue
         xls, err = read_excel_robust(content, filename)
         if xls is None:
             errors.append(err)
@@ -365,7 +370,6 @@ def parse_planning(files_data: list):
         else:
             errors.append(f"{filename}: feuille 'Tout (WFO+WFH)' ou 'TMM' introuvable")
             continue
-        # ★ IDs en TEXTE (comme l'ancien outil)
         df['WORKDAY ID'] = norm_id_series(df['WORKDAY ID'])
         df['Paid ID'] = df['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
         df = df[df['WORKDAY ID'].str.contains(r'[A-Z0-9]', na=False)]
@@ -427,7 +431,6 @@ def parse_liste_visite(filename: str, content: bytes):
         else: df['Statut'] = 'ENC'
 
         df = df.rename(columns={id_col: 'WORKDAY ID'})
-        # ★ IDs en TEXTE (comme l'ancien outil)
         df['WORKDAY ID'] = norm_id_series(df['WORKDAY ID'])
         if nom_col: df = df.rename(columns={nom_col: 'Nom'})
         if 'Nom' not in df.columns: df['Nom'] = ''
@@ -439,7 +442,7 @@ def parse_liste_visite(filename: str, content: bytes):
         df['Ancienneté'] = df['Date d\'embauche'].apply(calculate_anciennete)
         df['Ancienneté_num'] = df['Date d\'embauche'].apply(calculate_anciennete_num)
 
-        # ★ PORTAGE STREAMLIT : toutes les colonnes de suivi dès l'import
+        # Toutes les colonnes de suivi dès l'import
         df['Statut Visite'] = 'Non Planifié'
         df['Date Visite'] = pd.NaT
         df['Créneau Visite'] = pd.NaT
@@ -451,7 +454,7 @@ def parse_liste_visite(filename: str, content: bytes):
 
         final_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Ancienneté_num', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Heure Départ', 'Heure Retour', 'Commentaire']
         return df[final_cols].drop_duplicates(subset=['WORKDAY ID'])
-    except Exception as e:
+    except Exception:
         print("ERREUR parse_liste_visite:", traceback.format_exc())
         return None
 
@@ -467,7 +470,7 @@ def parse_rta_file(filename: str, content: bytes):
     cols_cleaned = [str(c).strip().upper().replace('É', 'E').replace('È', 'E').replace('Ê', 'E').replace('À', 'A') for c in df.columns]
     df.columns = cols_cleaned
     rename_map = {'WORKDAY ID': 'WORKDAY ID', 'NOM': 'Nom', 'PRENOM': 'Prénom', 'STATUT VISITE': 'Statut Visite', 'DATE VISITE': 'Date Visite', 'HEURE DEPART': 'Heure Départ', 'HEURE RETOUR': 'Heure Retour', 'COMMENTAIRES': 'Commentaire', 'DUREE': 'Durée', 'PROJET': 'Projet'}
-    # ★ Détection de la colonne « Nombre d'appels » (variantes possibles)
+    # Détection de la colonne « Nombre d'appels » (variantes possibles)
     for c in df.columns:
         cu = str(c).upper()
         if 'APPEL' in cu or 'CALL' in cu or 'TENTAT' in cu:
@@ -477,7 +480,6 @@ def parse_rta_file(filename: str, content: bytes):
     df = df.rename(columns=current_renames)
     df = df.loc[:, ~df.columns.duplicated()]
     df = df.replace(['*', '-', 'nan', 'None', ''], np.nan)
-    # ★ IDs en TEXTE (comme l'ancien outil)
     df['WORKDAY ID'] = norm_id_series(df['WORKDAY ID'])
     if 'Date Visite' in df.columns: df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce', dayfirst=True)
     if 'Date d\'embauche' in df.columns: df['Date d\'embauche'] = pd.to_datetime(df['Date d\'embauche'], errors='coerce', dayfirst=True)
@@ -489,8 +491,8 @@ def parse_rta_file(filename: str, content: bytes):
         df["Nombre d'appels"] = pd.to_numeric(df["Nombre d'appels"], errors='coerce').fillna(0).astype(int)
     return df
 
-# ★ Import du planning généré exporté de l'ancien outil
 def parse_generated_legacy(filename: str, content: bytes):
+    """Parse le fichier excel exporté de l'ancien outil (planifiés + shifts)."""
     try:
         xls, err = read_excel_robust(content, filename)
         if xls is None:
@@ -534,7 +536,7 @@ def parse_generated_legacy(filename: str, content: bytes):
         return None
 
 def import_generated_to_medical(df):
-    """★ Fusionne les données de l'ancien outil dans la liste médicale."""
+    """Fusionne les données de l'ancien outil dans la liste médicale."""
     med_list = app_state.get('medical_list')
     df = df.copy()
     df['WORKDAY ID'] = norm_id_series(df['WORKDAY ID'])
@@ -562,8 +564,99 @@ def import_generated_to_medical(df):
             for c in [c for c in med_list.columns if c not in new_ids.columns]:
                 new_ids[c] = pd.NaT if ('Date' in c or 'Créneau' in c) else ''
             med_list = pd.concat([med_list, new_ids[med_list.columns]], ignore_index=True)
+
+    # Normalisation des types AVANT retour (sinon les dates restent du texte)
+    if 'Date Visite' in med_list.columns:
+        med_list['Date Visite'] = pd.to_datetime(med_list['Date Visite'], errors='coerce')
+    if 'Créneau Visite' in med_list.columns:
+        med_list['Créneau Visite'] = pd.to_datetime(med_list['Créneau Visite'], errors='coerce')
+    if 'Date d\'embauche' in med_list.columns:
+        med_list['Date d\'embauche'] = pd.to_datetime(med_list['Date d\'embauche'], errors='coerce')
     return med_list
 
+# ==========================================================
+# VUE FUSIONNÉE "PLANNING GÉNÉRÉ"
+# (planifiés de l'outil Génération + lignes 'Planifié' du fichier Suivi RTA)
+# ==========================================================
+def build_planning_genere(week_name=None):
+    out_cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Projet', 'Statut Visite',
+                'Date Visite', 'Créneau Visite', 'Heure Départ', 'Heure Retour',
+                'Shift Début', 'Shift Fin', 'Priorité Visite', 'Source']
+
+    gen_part = pd.DataFrame()
+    rta_part = pd.DataFrame()
+
+    # 1) Planifiés par l'outil Génération (liste médicale persistée)
+    med = app_state.get('medical_list')
+    if med is not None and not med.empty and 'Statut Visite' in med.columns:
+        m = med.copy()
+        m['WORKDAY ID'] = norm_id_series(m['WORKDAY ID'])
+        m['Date Visite'] = pd.to_datetime(m.get('Date Visite'), errors='coerce')
+        mask_m = (m['Statut Visite'].astype(str).str.strip() == 'Planifié') & m['Date Visite'].notna()
+        if mask_m.any():
+            mp = m[mask_m].copy()
+            try:
+                mp = enrich_shifts(mp, app_state.get('plannings', {}))
+            except Exception:
+                if 'Shift Début' not in mp.columns: mp['Shift Début'] = ''
+                if 'Shift Fin' not in mp.columns: mp['Shift Fin'] = ''
+            for c in out_cols:
+                if c not in mp.columns: mp[c] = ''
+            mp['Source'] = 'Génération'
+            gen_part = mp[out_cols]
+
+    # 2) Lignes 'Planifié' du fichier Suivi RTA importé
+    rta = app_state.get('rta_data')
+    if rta is not None and not rta.empty and 'Statut Visite' in rta.columns:
+        r = rta.copy()
+        r['WORKDAY ID'] = norm_id_series(r['WORKDAY ID'])
+        r['Date Visite'] = pd.to_datetime(r.get('Date Visite'), errors='coerce')
+        mask_r = r['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie']) & r['Date Visite'].notna()
+        if mask_r.any():
+            rp = r[mask_r].copy()
+            if not gen_part.empty:
+                pid_map = dict(zip(gen_part['WORKDAY ID'], gen_part['Payroll ID'].astype(str)))
+                rp['Payroll ID'] = rp['WORKDAY ID'].map(pid_map).fillna('')
+            try:
+                rp = enrich_shifts(rp, app_state.get('plannings', {}))
+            except Exception:
+                pass
+            for c in out_cols:
+                if c not in rp.columns: rp[c] = ''
+            rp['Source'] = 'Suivi RTA'
+            rta_part = rp[out_cols]
+
+    # Dédoublonnage : (WORKDAY ID, Date) déjà présent côté Génération -> pas de doublon RTA
+    if not gen_part.empty and not rta_part.empty:
+        gen_keys = set(zip(gen_part['WORKDAY ID'], gen_part['Date Visite'].dt.strftime('%Y-%m-%d')))
+        keep = [(wid, d.strftime('%Y-%m-%d')) not in gen_keys
+                for wid, d in zip(rta_part['WORKDAY ID'], rta_part['Date Visite'])]
+        rta_part = rta_part[keep]
+
+    combined = pd.concat([gen_part, rta_part], ignore_index=True)
+
+    # Filtre par semaine (page Génération)
+    if week_name and week_name != 'Aucune semaine' and not combined.empty:
+        dates_map = get_dates_from_week(week_name)
+        start = pd.Timestamp(dates_map['Lundi'])
+        end = start + pd.Timedelta(days=6)
+        combined = combined[(combined['Date Visite'] >= start) & (combined['Date Visite'] <= end)]
+
+    if combined.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    combined['Date Visite'] = pd.to_datetime(combined['Date Visite'], errors='coerce')
+    combined = combined.sort_values(['Date Visite', 'Nom'], na_position='last')
+    combined['Date Visite'] = combined['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
+    combined['Créneau Visite'] = pd.to_datetime(combined['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
+    for c in ['Heure Départ', 'Heure Retour']:
+        if c in combined.columns:
+            combined[c] = pd.to_datetime(combined[c].astype(str).replace('NaT', ''), errors='coerce').dt.strftime('%H:%M').fillna('')
+    return combined[out_cols]
+
+# ==========================================================
+# IMPORT
+# ==========================================================
 @app.post("/api/import")
 async def import_files(files: List[UploadFile] = File(...), category: str = Form(...), week_name: str = Form(None)):
     try:
@@ -600,7 +693,6 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
             if app_state.get('medical_list') is not None:
                 med_list = app_state['medical_list'].copy()
                 med_list['WORKDAY ID'] = norm_id_series(med_list['WORKDAY ID'])
-                # ★ Vectorisé (rapide) : mise à jour depuis le suivi RTA
                 com_lower = df['Commentaire'].astype(str).str.lower()
                 statut_lower = df['Statut Visite'].astype(str).str.lower()
                 ok_wids = set(df.loc[com_lower.str.contains('ok', na=False), 'WORKDAY ID'].dropna())
@@ -612,6 +704,11 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
                 med_list.loc[med_list['WORKDAY ID'].isin(abs_wids), 'Créneau Visite'] = pd.NaT
                 app_state['medical_list'] = med_list
 
+            if 'Date Visite' in df.columns:
+                df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce')
+            for c in ['Heure Départ', 'Heure Retour']:
+                if c in df.columns:
+                    df[c] = pd.to_datetime(df[c].astype(str).replace('NaT', ''), errors='coerce')
             app_state['rta_data'] = df
             save_history()
             return {"message": f"✅ Suivi RTA importé: {len(df)} lignes.", "data": clean_for_json(df.head(50))}
@@ -633,6 +730,9 @@ async def import_files(files: List[UploadFile] = File(...), category: str = Form
         print("ERREUR BACKEND:", traceback.format_exc())
         return {"message": f"❌ Erreur Python: {str(e)}"}
 
+# ==========================================================
+# LECTURE DES DONNÉES
+# ==========================================================
 @app.get("/api/get_planning/{week_name}")
 async def get_planning(week_name: str):
     df = app_state['plannings'].get(week_name)
@@ -646,7 +746,6 @@ async def get_planning(week_name: str):
             rename_map[f'{j}_DE'] = f'{d_str} - Début'
             rename_map[f'{j}_A'] = f'{d_str} - Fin'
             rename_map[f'{j}_Flag'] = f'{d_str} - Présent'
-    # ★ 50 lignes AVANT formatage -> affichage quasi instantané
     display_df = df.head(50).rename(columns=rename_map)
     for j in jours:
         d_str = dates_map[j].strftime('%d/%m/%Y')
@@ -681,6 +780,59 @@ async def get_weeks():
         weeks_data.append({"name": wk, "dates": [dates_map[j].strftime('%Y-%m-%d') for j in jours[:5]]})
     return {"weeks": weeks_data}
 
+@app.get("/api/collab")
+async def get_collab():
+    med = app_state.get('medical_list')
+    if med is None or med.empty: return {"data": []}
+    cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Créneau Visite']
+    cols = [c for c in cols if c in med.columns]
+    df = med[cols].head(200).copy()
+    for c, fmt in [('Date d\'embauche', '%d/%m/%Y'), ('Date Visite', '%d/%m/%Y'), ('Créneau Visite', '%H:%M')]:
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c], errors='coerce').dt.strftime(fmt).fillna('')
+    return {"data": clean_for_json(df)}
+
+@app.get("/api/suivi")
+async def get_suivi():
+    df = app_state.get('rta_data')
+    if df is None or df.empty: return {"data": []}
+    d = df.head(200).copy()
+    if 'Date Visite' in d.columns:
+        d['Date Visite'] = pd.to_datetime(d['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+    for c in ['Heure Départ', 'Heure Retour']:
+        if c in d.columns:
+            d[c] = pd.to_datetime(d[c].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
+    return {"data": clean_for_json(d)}
+
+@app.get("/api/generated")
+async def get_generated(week: str = None):
+    # Sans paramètre -> vue complète (page Planning généré : Génération + Suivi RTA)
+    # Avec ?week=S37   -> vue filtrée sur la semaine (page Génération)
+    try:
+        df = await asyncio.to_thread(build_planning_genere, week)
+        return {"data": clean_for_json(df) if not df.empty else []}
+    except Exception:
+        print("ERREUR get_generated:", traceback.format_exc())
+        return {"data": []}
+
+@app.post("/api/unplan")
+async def unplan_all():
+    med_list = app_state.get('medical_list')
+    if med_list is not None:
+        mask = med_list['Date Visite'].notna()
+        med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
+        med_list.loc[mask, 'Date Visite'] = pd.NaT
+        med_list.loc[mask, 'Créneau Visite'] = pd.NaT
+        for col in ['Heure Départ', 'Heure Retour']:
+            if col in med_list.columns: med_list.loc[mask, col] = pd.NaT
+        if 'Commentaire' in med_list.columns: med_list.loc[mask, 'Commentaire'] = ''
+        app_state['medical_list'] = med_list
+        save_history()
+    return {"message": "Toutes les planifications ont été effacées."}
+
+# ==========================================================
+# GÉNÉRATION
+# ==========================================================
 @app.post("/api/generate")
 async def generate_planning(config: str = Form(...)):
     try:
@@ -697,14 +849,13 @@ async def generate_planning(config: str = Form(...)):
                              ('Commentaire', '')]:
             if col not in medical_list.columns:
                 medical_list[col] = default
-        # Garde-fous : colonnes utilisées par la génération (évite les KeyError)
         for col, default in [('Projet', 'N/A'), ('Statut', 'ENC'), ('Priorité Visite', 'N/A'),
                              ('Payroll ID', ''), ('Ancienneté_num', 0)]:
             if col not in medical_list.columns:
                 medical_list[col] = default
         medical_list['Ancienneté_num'] = pd.to_numeric(medical_list['Ancienneté_num'], errors='coerce').fillna(0)
 
-        # Normalisation des IDs en TEXTE (évite l'erreur de merge)
+        # Normalisation des IDs en TEXTE
         current_planning = current_planning.copy()
         medical_list['WORKDAY ID'] = norm_id_series(medical_list['WORKDAY ID'])
         current_planning['WORKDAY ID'] = norm_id_series(current_planning['WORKDAY ID'])
@@ -850,6 +1001,12 @@ async def generate_planning(config: str = Form(...)):
                 if sum(slot_counts.values()) >= capacity:
                     add_raison("capacité des créneaux atteinte (4 pers/créneau)", len(working_df) - day_picked)
 
+        # Normalisation des types AVANT sauvegarde (sinon les dates restent du texte)
+        medical_list['Date Visite'] = pd.to_datetime(medical_list['Date Visite'], errors='coerce')
+        medical_list['Créneau Visite'] = pd.to_datetime(medical_list['Créneau Visite'], errors='coerce')
+        for c in ['Heure Départ', 'Heure Retour']:
+            if c in medical_list.columns:
+                medical_list[c] = pd.to_datetime(medical_list[c], errors='coerce')
         app_state['medical_list'] = medical_list
         save_history()
 
@@ -877,47 +1034,9 @@ async def generate_planning(config: str = Form(...)):
         print("ERREUR GÉNÉRATION:", traceback.format_exc())
         return {"message": f"❌ Erreur génération: {str(e)}"}
 
-@app.post("/api/unplan")
-async def unplan_all():
-    med_list = app_state.get('medical_list')
-    if med_list is not None:
-        mask = med_list['Date Visite'].notna()
-        med_list.loc[mask, 'Statut Visite'] = 'Non Planifié'
-        med_list.loc[mask, 'Date Visite'] = pd.NaT
-        med_list.loc[mask, 'Créneau Visite'] = pd.NaT
-        for col in ['Heure Départ', 'Heure Retour']:
-            if col in med_list.columns: med_list.loc[mask, col] = pd.NaT
-        if 'Commentaire' in med_list.columns: med_list.loc[mask, 'Commentaire'] = ''
-        app_state['medical_list'] = med_list
-        save_history()
-    return {"message": "Toutes les planifications ont été effacées."}
-@app.get("/api/collab")
-async def get_collab():
-    med = app_state.get('medical_list')
-    if med is None or med.empty: return {"data": []}
-    cols = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite', 'Statut Visite', 'Date Visite', 'Créneau Visite']
-    cols = [c for c in cols if c in med.columns]
-    df = med[cols].head(200).copy()
-    for c, fmt in [('Date d\'embauche', '%d/%m/%Y'), ('Date Visite', '%d/%m/%Y'), ('Créneau Visite', '%H:%M')]:
-        if c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors='coerce').dt.strftime(fmt).fillna('')
-    return {"data": clean_for_json(df)}
-
-@app.get("/api/suivi")
-async def get_suivi():
-    df = app_state.get('rta_data')
-    if df is None or df.empty: return {"data": []}
-    d = df.head(200).copy()
-    if 'Date Visite' in d.columns:
-        d['Date Visite'] = pd.to_datetime(d['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
-    for c in ['Heure Départ', 'Heure Retour']:
-        if c in d.columns:
-            d[c] = pd.to_datetime(d[c].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
-    return {"data": clean_for_json(d)}
-
-
-
-# ★ NON-EFFECTUÉES : calcul dynamique (Planifié + jour passé + commentaire ≠ OK)
+# ==========================================================
+# NON-EFFECTUÉES (calcul dynamique)
+# ==========================================================
 def build_non_effectuees():
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty: return pd.DataFrame()
@@ -952,6 +1071,9 @@ async def get_non_effectuees():
     df = await asyncio.to_thread(build_non_effectuees)
     return {"data": clean_for_json(df) if not df.empty else []}
 
+# ==========================================================
+# DASHBOARD
+# ==========================================================
 @app.get("/api/dashboard")
 async def get_dashboard(start_date: str = None, end_date: str = None):
     rta_data = app_state.get('rta_data')
@@ -1075,6 +1197,9 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
 
+# ==========================================================
+# EXPORT
+# ==========================================================
 @app.get("/api/export/{category}")
 async def export_data(category: str):
     df = None
@@ -1087,10 +1212,7 @@ async def export_data(category: str):
         rta_data = app_state.get('rta_data')
         if rta_data is not None:
             df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
-    elif category == 'generated':
-        med_list = app_state.get('medical_list')
-        if med_list is not None and 'Date Visite' in med_list.columns:
-            df = med_list[med_list['Date Visite'].notna()].copy()
+    elif category == 'generated': df = await asyncio.to_thread(build_planning_genere, None)
 
     if df is None or df.empty:
         return {"error": "Aucune donnée à exporter"}
