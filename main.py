@@ -697,7 +697,7 @@ async def generate_planning(config: str = Form(...)):
                              ('Commentaire', '')]:
             if col not in medical_list.columns:
                 medical_list[col] = default
-        # ★ Garde-fous : colonnes utilisées par la génération (évite les KeyError)
+        # Garde-fous : colonnes utilisées par la génération (évite les KeyError)
         for col, default in [('Projet', 'N/A'), ('Statut', 'ENC'), ('Priorité Visite', 'N/A'),
                              ('Payroll ID', ''), ('Ancienneté_num', 0)]:
             if col not in medical_list.columns:
@@ -810,22 +810,28 @@ async def generate_planning(config: str = Form(...)):
                         slot_end = (datetime.datetime.combine(date_obj, slot) + datetime.timedelta(minutes=30)).time()
                         if sd <= slot and sfe >= slot_end and slot_counts[slot] < 4:
                             assigned = slot; break
-                    if assigned is not None:
-                        wid = row['WORKDAY ID']
-                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Planifié'
-                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.to_datetime(date_obj)
-                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.to_datetime(datetime.datetime.combine(date_obj, assigned))
-                        cs = medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Commentaire']
+                    if assigned is None: continue
+                    wid = row['WORKDAY ID']
+                    row_mask = medical_list['WORKDAY ID'] == wid
+                    # Repli : si l'ID ne correspond pas (venu de la fusion Paid ID), on retente par Payroll ID
+                    if not row_mask.any() and 'Payroll ID' in row.index and pd.notna(row.get('Payroll ID')):
+                        pid = str(row['Payroll ID']).replace(" ", "").upper()
+                        row_mask = medical_list['Payroll ID'].astype(str).str.replace(" ", "", regex=False).str.upper() == pid
+                    if row_mask.any():
+                        medical_list.loc[row_mask, 'Statut Visite'] = 'Planifié'
+                        medical_list.loc[row_mask, 'Date Visite'] = pd.to_datetime(date_obj)
+                        medical_list.loc[row_mask, 'Créneau Visite'] = pd.to_datetime(datetime.datetime.combine(date_obj, assigned))
+                        cs = medical_list.loc[row_mask, 'Commentaire']
                         mc = str(cs.values[0]).lower() if not cs.empty else ''
                         if 'absent' in mc or 'report' in mc:
-                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Commentaire'] = ''
-                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Heure Départ'] = pd.NaT
-                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Heure Retour'] = pd.NaT
+                            medical_list.loc[row_mask, 'Commentaire'] = ''
+                            medical_list.loc[row_mask, 'Heure Départ'] = pd.NaT
+                            medical_list.loc[row_mask, 'Heure Retour'] = pd.NaT
                         slot_counts[assigned] += 1
                         picked += 1
                 return picked
 
-            # ★ Quotas River/Autres = préférences ; on complète le deficit avec les restants
+            # Quotas River/Autres = préférences ; le déficit est comblé avec les restants
             picked_r = try_assign(rivers, qty_r)
             picked_o = try_assign(others, qty_o)
             deficit = (qty_r - picked_r) + (qty_o - picked_o)
@@ -847,20 +853,23 @@ async def generate_planning(config: str = Form(...)):
         app_state['medical_list'] = medical_list
         save_history()
 
-        msg = f"✅ {total_planned} collaborateurs planifiés (sur {total_requested} demandés)."
+        start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
+        end_date = start_date + datetime.timedelta(days=6)
+        dts = pd.to_datetime(medical_list['Date Visite'], errors='coerce')
+        active_week_count = int(((medical_list['Statut Visite'] == 'Planifié') & (dts >= pd.Timestamp(start_date)) & (dts <= pd.Timestamp(end_date))).sum())
+
+        msg = f"✅ {total_planned} collaborateurs planifiés (sur {total_requested} demandés) — {active_week_count} visites enregistrées sur la période."
         if total_planned < total_requested:
             detail = ", ".join([f"{v} {k}" for k, v in raisons.items()]) if raisons else "créneaux/shifts incompatibles"
             msg += f" ⚠️ Explication (cumul sur les jours actifs) : {detail}."
 
-        start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
-        end_date = start_date + datetime.timedelta(days=6)
         planned_this_week = medical_list[
             (medical_list['Statut Visite'] == 'Planifié') &
-            (pd.to_datetime(medical_list['Date Visite'], errors='coerce') >= pd.Timestamp(start_date)) &
-            (pd.to_datetime(medical_list['Date Visite'], errors='coerce') <= pd.Timestamp(end_date))
+            (dts >= pd.Timestamp(start_date)) & (dts <= pd.Timestamp(end_date))
         ].copy()
-        planned_this_week = enrich_shifts(planned_this_week, app_state.get('plannings', {}))
-        planned_this_week['Date Visite'] = planned_this_week['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
+        if not planned_this_week.empty:
+            planned_this_week = enrich_shifts(planned_this_week, app_state.get('plannings', {}))
+        planned_this_week['Date Visite'] = pd.to_datetime(planned_this_week['Date Visite'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
         planned_this_week['Créneau Visite'] = pd.to_datetime(planned_this_week['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
         out_cols = [c for c in ['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Priorité Visite'] if c in planned_this_week.columns]
         return {"message": msg, "data": clean_for_json(planned_this_week[out_cols])}
@@ -906,147 +915,7 @@ async def get_suivi():
             d[c] = pd.to_datetime(d[c].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
     return {"data": clean_for_json(d)}
 
-@app.post("/api/generate")
-async def generate_planning(config: str = Form(...)):
-    try:
-        config = json.loads(config)
-        medical_list = app_state['medical_list'].copy()
-        current_week = config['week']
-        current_planning = app_state['plannings'].get(current_week)
-        if medical_list is None or current_planning is None: return {"message": "❌ Erreur: Liste ou planning manquant."}
 
-        # ★ PORTAGE STREAMLIT : garantir la présence des colonnes (données anciennes)
-        for col, default in [('Statut Visite', 'Non Planifié'), ('Date Visite', pd.NaT), ('Créneau Visite', pd.NaT),
-                             ('Shift Début', ''), ('Shift Fin', ''), ('Heure Départ', pd.NaT), ('Heure Retour', pd.NaT),
-                             ('Commentaire', '')]:
-            if col not in medical_list.columns:
-                medical_list[col] = default
-
-        current_planning = current_planning.copy()
-        # ★ NORMALISATION IDs en TEXTE (corrige l'erreur de merge str/Int64)
-        medical_list['WORKDAY ID'] = norm_id_series(medical_list['WORKDAY ID'])
-        current_planning['WORKDAY ID'] = norm_id_series(current_planning['WORKDAY ID'])
-        if 'Payroll ID' in medical_list.columns:
-            medical_list['Payroll ID'] = medical_list['Payroll ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
-        if 'Paid ID' in current_planning.columns:
-            current_planning['Paid ID'] = current_planning['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
-
-        total_planned = 0
-        for day_config in config['days']:
-            if not day_config['actif']: continue
-            date_str = day_config['date']
-            date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
-            day_idx = date_obj.weekday()
-            sel_day = jours[day_idx]
-            de_col = f"{sel_day}_DE"
-            a_col = f"{sel_day}_A"
-
-            cols_to_drop = [c for c in ['Nom', 'Projet', 'Statut'] if c in current_planning.columns]
-            planning_to_merge = current_planning.drop(columns=cols_to_drop).copy()
-            merged_wid = pd.merge(medical_list, planning_to_merge, on='WORKDAY ID', how='inner', suffixes=('', '_planning'))
-            unmatched_med = medical_list[~medical_list['WORKDAY ID'].isin(merged_wid['WORKDAY ID'])].copy()
-            if 'Payroll ID' in unmatched_med.columns and 'Paid ID' in planning_to_merge.columns:
-                unmatched_med_renamed = unmatched_med.rename(columns={'Payroll ID': 'Paid ID'})
-                merged_pid = pd.merge(unmatched_med_renamed, planning_to_merge, on='Paid ID', how='inner', suffixes=('', '_planning'))
-                merged_pid['WORKDAY ID'] = merged_pid['WORKDAY ID'].fillna(merged_pid.get('WORKDAY ID_planning'))
-                merged_wid = pd.concat([merged_wid, merged_pid], ignore_index=True)
-
-            working_df = merged_wid.copy()
-            if working_df.empty: continue
-            working_df = working_df[working_df[de_col].apply(is_planned)].copy()
-
-            def is_available_during_slot(row, de_c, a_c, c_debut, c_fin):
-                shift_debut = get_time_obj(row[de_c])
-                shift_fin = get_time_obj(row[a_c])
-                if not shift_debut or not shift_fin: return False
-                return shift_debut < c_fin and shift_fin > c_debut
-
-            c_debut = datetime.datetime.strptime(day_config['debut'], '%H:%M').time()
-            c_fin = datetime.datetime.strptime(day_config['fin'], '%H:%M').time()
-            working_df['_is_avail'] = working_df.apply(lambda r: is_available_during_slot(r, de_col, a_col, c_debut, c_fin), axis=1)
-            working_df = working_df[working_df['_is_avail']].copy()
-
-            if day_config['statut_filter'] != "Tous":
-                working_df = working_df[working_df['Statut'].astype(str).str.upper() == day_config['statut_filter'].upper()]
-            working_df = working_df[~working_df['Statut Visite'].isin(['Planifié', 'Visite Faite'])]
-            # ★ PORTAGE STREAMLIT : absents détectés via Statut Visite OU Commentaire
-            working_df['_is_replan'] = working_df.apply(lambda r: 'absent' in str(r.get('Statut Visite', '')).lower() or 'report' in str(r.get('Statut Visite', '')).lower() or 'absent' in str(r.get('Commentaire', '')).lower() or 'report' in str(r.get('Commentaire', '')).lower(), axis=1)
-
-            if day_config['prio'] != "Aucune priorité" and 'Priorité Visite' in working_df.columns:
-                working_df['_is_priority'] = working_df['Priorité Visite'].astype(str).str.strip().str.lower() == day_config['prio'].lower()
-                working_df = working_df.sort_values(by=['_is_replan', '_is_priority', 'Ancienneté_num'], ascending=[False, False, False])
-            else:
-                working_df['_is_priority'] = False
-                working_df = working_df.sort_values(by=['_is_replan', 'Ancienneté_num'], ascending=[False, False])
-
-            is_river = working_df['Projet'].astype(str).str.contains('RIVER|AMAZON', case=False, na=False)
-            df_river = working_df[is_river]
-            df_others = working_df[~is_river]
-
-            slots = []
-            current_slot_dt = datetime.datetime.combine(date_obj, c_debut)
-            end_slot_dt = datetime.datetime.combine(date_obj, c_fin) - datetime.timedelta(minutes=30)
-            while current_slot_dt <= end_slot_dt:
-                slots.append(current_slot_dt.time())
-                current_slot_dt += datetime.timedelta(minutes=30)
-            slot_counts = {slot: 0 for slot in slots}
-
-            def assign_slots(df_group, target_qty):
-                picked_count = 0
-                for idx, row in df_group.iterrows():
-                    if picked_count >= target_qty: break
-                    shift_d = get_time_obj(row[de_col])
-                    shift_f = get_time_obj(row[a_col])
-                    if not shift_d or not shift_f: continue
-                    shift_f_eval = shift_f
-                    if shift_f < shift_d: shift_f_eval = datetime.time(23, 59)
-                    assigned_slot = None
-                    for slot in slots:
-                        slot_end_dt = datetime.datetime.combine(date_obj, slot) + datetime.timedelta(minutes=30)
-                        slot_end = slot_end_dt.time()
-                        if shift_d <= slot and shift_f_eval >= slot_end:
-                            if slot_counts[slot] < 4:
-                                assigned_slot = slot
-                                break
-                    if assigned_slot is not None:
-                        wid = row['WORKDAY ID']
-                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Statut Visite'] = 'Planifié'
-                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Date Visite'] = pd.to_datetime(date_obj)
-                        slot_dt = datetime.datetime.combine(date_obj, assigned_slot)
-                        medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Créneau Visite'] = pd.to_datetime(slot_dt)
-                        # ★ PORTAGE STREAMLIT : replanification d'un absent -> remise à zéro du suivi
-                        comment_series = medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Commentaire']
-                        med_comment = str(comment_series.values[0]).lower() if not comment_series.empty else ''
-                        if 'absent' in med_comment or 'report' in med_comment:
-                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Commentaire'] = ''
-                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Heure Départ'] = pd.NaT
-                            medical_list.loc[medical_list['WORKDAY ID'] == wid, 'Heure Retour'] = pd.NaT
-                        slot_counts[assigned_slot] += 1
-                        picked_count += 1
-                return picked_count
-
-            picked_river = assign_slots(df_river, int(day_config['qty_river']))
-            picked_others = assign_slots(df_others, int(day_config['qty_others']))
-            total_planned += picked_river + picked_others
-
-        app_state['medical_list'] = medical_list
-        save_history()
-        start_date = datetime.datetime.strptime(config['days'][0]['date'], '%Y-%m-%d').date()
-        end_date = start_date + datetime.timedelta(days=6)
-        planned_this_week = medical_list[
-            (medical_list['Statut Visite'] == 'Planifié') &
-            (pd.to_datetime(medical_list['Date Visite'], errors='coerce') >= pd.Timestamp(start_date)) &
-            (pd.to_datetime(medical_list['Date Visite'], errors='coerce') <= pd.Timestamp(end_date))
-        ].copy()
-        # ★ PORTAGE STREAMLIT : shifts affichés dans le tableau des planifiés
-        planned_this_week = enrich_shifts(planned_this_week, app_state.get('plannings', {}))
-        planned_this_week['Date Visite'] = planned_this_week['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
-        planned_this_week['Créneau Visite'] = pd.to_datetime(planned_this_week['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
-        out_cols = [c for c in ['WORKDAY ID', 'Nom', 'Projet', 'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin', 'Priorité Visite'] if c in planned_this_week.columns]
-        return {"message": f"✅ {total_planned} collaborateurs planifiés !", "data": clean_for_json(planned_this_week[out_cols])}
-    except Exception as e:
-        print("ERREUR GÉNÉRATION:", traceback.format_exc())
-        return {"message": f"❌ Erreur génération: {str(e)}"}
 
 # ★ NON-EFFECTUÉES : calcul dynamique (Planifié + jour passé + commentaire ≠ OK)
 def build_non_effectuees():
