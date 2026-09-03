@@ -1164,7 +1164,6 @@ def build_chart4():
         if col not in ml.columns:
             ml[col] = default
 
-    # Ceux qui n'ont pas encore fait de visite
     not_done = ml[
         (ml['Statut Visite'].astype(str).str.strip() != 'Visite Faite') &
         (~ml['Commentaire'].astype(str).str.lower().str.contains('ok', na=False))
@@ -1172,14 +1171,13 @@ def build_chart4():
     if not_done.empty:
         return []
 
-    # Ancienneté recalculée en temps réel depuis la date d'embauche
     if 'Date d\'embauche' in not_done.columns:
         hire = pd.to_datetime(not_done['Date d\'embauche'], errors='coerce')
     else:
         hire = pd.Series(pd.NaT, index=not_done.index)
     today = pd.Timestamp(datetime.date.today())
     months = (today.year - hire.dt.year) * 12 + (today.month - hire.dt.month)
-    months = months.where(hire.notna(), -1)  # -1 = date inconnue
+    months = months.where(hire.notna(), -1)
 
     def cat(m):
         if m < 0: return 'Embauche inconnue'
@@ -1196,7 +1194,7 @@ def build_chart4():
 
 @app.get("/api/dashboard")
 async def get_dashboard(start_date: str = None, end_date: str = None):
-    # ★ Chart 4 : indépendant du RTA et du filtre de date
+    # Chart 4 : indépendant du RTA et du filtre de date
     chart4_data = await asyncio.to_thread(build_chart4)
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
@@ -1227,7 +1225,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if med_df.empty and total_a_passer > 0:
         return {
             "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0.0%"},
-            "avg_duration": [], "top5": [], "done_visites": [],"chart4": chart4_data,
+            "avg_duration": [], "top5": [], "done_visites": [], "chart4": chart4_data,
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
 
@@ -1315,7 +1313,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         done_visites = clean_for_json(done_df[cols])
 
     return {
-        "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites,"chart4": chart4_data,
+        "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "chart4": chart4_data,
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
 
