@@ -633,58 +633,51 @@ def import_generated_to_medical(df):
     return med_list
 
 # ==========================================================
-# VUE FUSIONNÉE "PLANNING GÉNÉRÉ"
-# (planifiés de l'outil Génération + lignes 'Planifié' du fichier Suivi RTA)
+# VUE "PLANNING GÉNÉRÉ" — 14 colonnes, ordre de l'ancien outil
 # ==========================================================
-# Colonnes affichées dans la vue "Planning généré"
-# Colonnes affichées dans la vue "Planning généré"
-DISPLAY_COLS = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Projet', 'Statut',
-                'Date d\'embauche', 'Ancienneté', 'Statut Visite', 'Date Visite',
-                'Créneau Visite', 'Shift Début', 'Shift Fin']
+DISPLAY_COLS = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Statut',
+                'Date d\'embauche', 'Ancienneté', 'Projet', 'Priorité Visite',
+                'Statut Visite', 'Date Visite', 'Créneau Visite',
+                'Shift Début', 'Shift Fin']
 
 def build_planning_genere(week_name=None, only_generated=False):
-    """
-    Vue 'Planning généré'.
-    - only_generated=False : Génération + Suivi RTA (page Planning généré)
-    - only_generated=True  : uniquement l'outil Génération (page Génération)
-    - week_name : filtre optionnel sur la semaine (ex: 'S37')
-    """
-    gen_part = pd.DataFrame()
-    rta_part = pd.DataFrame()
-
-    # Index de la liste médicale pour compléter Statut / embauche / ancienneté / Payroll
+    """only_generated=True -> uniquement l'outil Génération (page Génération).
+    Sinon : Génération + lignes 'Planifié' du Suivi RTA (page Planning généré)."""
     med_all = app_state.get('medical_list')
     med_index = None
     if med_all is not None and not med_all.empty:
         m2 = med_all.copy()
         m2['WORKDAY ID'] = norm_id_series(m2['WORKDAY ID'])
-        for col in ['Payroll ID', 'Statut', 'Date d\'embauche', 'Ancienneté']:
+        for col in ['Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche',
+                    'Ancienneté', 'Projet', 'Priorité Visite']:
             if col not in m2.columns:
                 m2[col] = ''
         med_index = m2.drop_duplicates(subset=['WORKDAY ID']).set_index('WORKDAY ID')
 
     def fill_from_medical(df):
-        """Complète les colonnes manquantes depuis la liste médicale (sans écraser l'existant)."""
+        """Complète les infos collaborateur depuis la liste médicale (sans écraser l'existant)."""
         if med_index is None or df.empty:
             return df
-        for col in ['Payroll ID', 'Statut', 'Date d\'embauche', 'Ancienneté']:
+        for col in ['Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche',
+                    'Ancienneté', 'Projet', 'Priorité Visite']:
             if col in med_index.columns:
-                mapping = med_index[col].to_dict()
-                better = df['WORKDAY ID'].map(mapping)
+                better = df['WORKDAY ID'].map(med_index[col].to_dict()).fillna('').astype(str).str.strip()
                 if col in df.columns:
                     cur = df[col].fillna('').astype(str).str.strip()
-                    better = better.fillna('').astype(str).str.strip()
-                    df[col] = [b if not c else c for c, b in zip(cur, better)]
+                    df[col] = [b if (not c or c.lower() in ('nan', 'nat')) else c
+                               for c, b in zip(cur, better)]
                 else:
                     df[col] = better
         return df
 
-    # 1) Planifiés par l'outil Génération (liste médicale persistée)
+    gen_part = pd.DataFrame()
+    rta_part = pd.DataFrame()
+
+    # 1) Planifiés par l'outil Génération (liste médicale)
     med = app_state.get('medical_list')
     if med is not None and not med.empty and 'Statut Visite' in med.columns:
         m = med.copy()
         m = ensure_source_col(m)
-        # Page Génération : uniquement les planifications générées par l'outil
         if only_generated:
             m = m[m['Source Planification'].astype(str) == 'Génération']
         m['WORKDAY ID'] = norm_id_series(m['WORKDAY ID'])
@@ -698,10 +691,9 @@ def build_planning_genere(week_name=None, only_generated=False):
                 if 'Shift Début' not in mp.columns: mp['Shift Début'] = ''
                 if 'Shift Fin' not in mp.columns: mp['Shift Fin'] = ''
             mp = fill_from_medical(mp)
-            mp['Source'] = 'Génération'
             gen_part = mp
 
-    # 2) Lignes 'Planifié' du fichier Suivi RTA (ignorées pour la page Génération)
+    # 2) Lignes 'Planifié' du fichier Suivi RTA
     if not only_generated:
         rta = app_state.get('rta_data')
         if rta is not None and not rta.empty and 'Statut Visite' in rta.columns:
@@ -711,16 +703,14 @@ def build_planning_genere(week_name=None, only_generated=False):
             mask_r = r['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie']) & r['Date Visite'].notna()
             if mask_r.any():
                 rp = r[mask_r].copy()
-                # ★ Statut / Date d'embauche / Ancienneté / Payroll ID récupérés depuis la liste médicale
                 rp = fill_from_medical(rp)
                 try:
                     rp = enrich_shifts(rp, app_state.get('plannings', {}))
                 except Exception:
                     pass
-                rp['Source'] = 'Suivi RTA'
                 rta_part = rp
 
-    # Dédoublonnage : (WORKDAY ID, Date) déjà présent côté Génération -> pas de doublon RTA
+    # Dédoublonnage (WORKDAY ID, Date)
     if not gen_part.empty and not rta_part.empty:
         gen_keys = set(zip(gen_part['WORKDAY ID'], gen_part['Date Visite'].dt.strftime('%Y-%m-%d')))
         keep = [(wid, d.strftime('%Y-%m-%d')) not in gen_keys
@@ -744,11 +734,24 @@ def build_planning_genere(week_name=None, only_generated=False):
     combined['Date Visite'] = combined['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
     combined['Créneau Visite'] = pd.to_datetime(combined['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
     combined['Date d\'embauche'] = pd.to_datetime(combined['Date d\'embauche'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y').fillna('')
-    for c in ['Shift Début', 'Shift Fin']:
-        if c not in combined.columns: combined[c] = ''
     for c in DISPLAY_COLS:
-        if c not in combined.columns: combined[c] = ''
+        if c not in combined.columns:
+            combined[c] = ''
+        combined[c] = combined[c].fillna('').astype(str).replace('nan', '').replace('NaT', '')
     return combined[DISPLAY_COLS]
+
+
+@app.get("/api/generated")
+async def get_generated(week: str = None, source: str = None):
+    # Page Planning généré : /api/generated
+    # Page Génération       : /api/generated?source=generated&week=S37
+    try:
+        only_gen = (source == 'generated')
+        df = await asyncio.to_thread(build_planning_genere, week, only_gen)
+        return {"data": clean_for_json(df) if not df.empty else []}
+    except Exception:
+        print("ERREUR get_generated:", traceback.format_exc())
+        return {"data": []}
 
 # ==========================================================
 # IMPORT
