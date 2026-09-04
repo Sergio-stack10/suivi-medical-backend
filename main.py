@@ -974,6 +974,15 @@ async def generate_planning(request: Request, config: str = Form(...)):
             medical_list['Payroll ID'] = medical_list['Payroll ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
         if 'Paid ID' in current_planning.columns:
             current_planning['Paid ID'] = current_planning['Paid ID'].astype(str).str.replace(" ", "", regex=False).str.upper()
+        # ★ EXCLUSION GLOBALE : toute personne 'Planifié' dans le fichier Suivi RTA
+        #   ne doit JAMAIS être replanifiée (peu importe les commentaires).
+        rta = app_state.get('rta_data')
+        planned_ids_rta = set()
+        if rta is not None and not rta.empty and 'Statut Visite' in rta.columns:
+            r_tmp = rta.copy()
+            r_tmp['WORKDAY ID'] = norm_id_series(r_tmp['WORKDAY ID'])
+            mask_r = r_tmp['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie'])
+            planned_ids_rta = set(r_tmp.loc[mask_r, 'WORKDAY ID'].dropna())
 
         total_requested = 0
         total_planned = 0
@@ -1028,8 +1037,10 @@ async def generate_planning(request: Request, config: str = Form(...)):
             add_raison("shift hors créneau horaire", (~working_df['_is_avail']).sum())
             working_df = working_df[working_df['_is_avail']].copy()
 
-            already_mask = working_df['Statut Visite'].isin(['Planifié', 'Visite Faite'])
-            add_raison("déjà planifiés / visites faites", already_mask.sum())
+            # Exclus : planifiés par l'outil, visites faites, ET tout 'Planifié' du Suivi RTA
+            already_mask = working_df['Statut Visite'].isin(['Planifié', 'Visite Faite']) | \
+                           working_df['WORKDAY ID'].isin(planned_ids_rta)
+            add_raison("déjà planifiés (généré ou Suivi) / visites faites", already_mask.sum())
             working_df = working_df[~already_mask].copy()
 
             if working_df.empty: continue
