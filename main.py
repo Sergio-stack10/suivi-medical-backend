@@ -1314,7 +1314,9 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
-    reste_a_planifier = max(0, total_a_passer - total_fait - total_planifie)
+    # ★ Les visites effectuées font partie des planifiées (progression),
+    #   on ne les compte donc pas deux fois.
+    reste_a_planifier = max(0, total_a_passer - total_planifie)
 
     metrics = {
         "total_a_passer": total_a_passer,
@@ -1352,7 +1354,10 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-    chart3_data = {"effectuee": total_fait, "reste": total_planifie, "non_planifie": reste_a_planifier}
+    # ★ Progression : Effectuée ⊂ Planifié → Reste Planifié = Planifié - Effectuée
+    chart3_data = {"effectuee": total_fait,
+                   "reste": max(0, total_planifie - total_fait),
+                   "non_planifie": reste_a_planifier}
 
     med_df['Date'] = med_df['Date Visite'].dt.date
     avg_df = med_df.dropna(subset=['Durée (min)']).groupby('Date')['Durée (min)'].mean().reset_index()
