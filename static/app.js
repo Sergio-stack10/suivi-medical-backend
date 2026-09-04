@@ -580,7 +580,7 @@ async function loadDashboard() {
             const date_order = c2.map(d => d.date);
             const t1 = { x: c2.map(d => d.date), y: c2.map(d => d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d => d.planifie), textposition: 'outside', offsetgroup: '0' };
             const t2 = { x: c2.map(d => d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' };
-            const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: { title: { text: 'Légende' } }, margin: { t: 50, b: 100 }, yaxis: { range: [0, max2 * 1.15] } };
+            const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: { title: { text: 'Légende' } }, margin: { t: 30, b: 70 }, yaxis: { range: [0, max2 * 1.15] } };
             Plotly.newPlot(chart2Div, [t1, t2], layout2);
         } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
@@ -588,7 +588,7 @@ async function loadDashboard() {
         const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
         if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
             const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
-            const layout3 = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, showlegend: false, margin: { t: 40, b: 20, l: 20, r: 20 } };
+            const layout3 = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, showlegend: false, margin: { t: 25, b: 15, l: 20, r: 20 } };
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
@@ -739,7 +739,7 @@ function filterChart4() {
         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#003D5B' },
         yaxis: { range: [0, maxVal * 1.15] },
-        margin: { t: 40, b: 60 },
+        margin: { t: 25, b: 45 },
         showlegend: false
     };
     Plotly.newPlot(chart4Div, [trace], layout4);
