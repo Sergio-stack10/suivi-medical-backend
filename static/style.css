@@ -192,3 +192,8 @@ tr:hover { background: #f9f9f9; }
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* --- Compactage du Dashboard --- */
+#chart1_div, #chart2_div, #chart3_div, #chart4_div {
+    min-height: 280px;
+    height: 320px;
+}
