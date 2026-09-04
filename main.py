@@ -637,8 +637,10 @@ def import_generated_to_medical(df):
 # (planifiés de l'outil Génération + lignes 'Planifié' du fichier Suivi RTA)
 # ==========================================================
 # Colonnes affichées dans la vue "Planning généré"
-DISPLAY_COLS = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Projet', 'Statut Visite',
-                'Date Visite', 'Créneau Visite', 'Shift Début', 'Shift Fin']
+# Colonnes affichées dans la vue "Planning généré"
+DISPLAY_COLS = ['WORKDAY ID', 'Payroll ID', 'Nom', 'Prénom', 'Projet', 'Statut',
+                'Date d\'embauche', 'Ancienneté', 'Statut Visite', 'Date Visite',
+                'Créneau Visite', 'Shift Début', 'Shift Fin']
 
 def build_planning_genere(week_name=None, only_generated=False):
     """
@@ -649,6 +651,33 @@ def build_planning_genere(week_name=None, only_generated=False):
     """
     gen_part = pd.DataFrame()
     rta_part = pd.DataFrame()
+
+    # Index de la liste médicale pour compléter Statut / embauche / ancienneté / Payroll
+    med_all = app_state.get('medical_list')
+    med_index = None
+    if med_all is not None and not med_all.empty:
+        m2 = med_all.copy()
+        m2['WORKDAY ID'] = norm_id_series(m2['WORKDAY ID'])
+        for col in ['Payroll ID', 'Statut', 'Date d\'embauche', 'Ancienneté']:
+            if col not in m2.columns:
+                m2[col] = ''
+        med_index = m2.drop_duplicates(subset=['WORKDAY ID']).set_index('WORKDAY ID')
+
+    def fill_from_medical(df):
+        """Complète les colonnes manquantes depuis la liste médicale (sans écraser l'existant)."""
+        if med_index is None or df.empty:
+            return df
+        for col in ['Payroll ID', 'Statut', 'Date d\'embauche', 'Ancienneté']:
+            if col in med_index.columns:
+                mapping = med_index[col].to_dict()
+                better = df['WORKDAY ID'].map(mapping)
+                if col in df.columns:
+                    cur = df[col].fillna('').astype(str).str.strip()
+                    better = better.fillna('').astype(str).str.strip()
+                    df[col] = [b if not c else c for c, b in zip(cur, better)]
+                else:
+                    df[col] = better
+        return df
 
     # 1) Planifiés par l'outil Génération (liste médicale persistée)
     med = app_state.get('medical_list')
@@ -668,6 +697,7 @@ def build_planning_genere(week_name=None, only_generated=False):
             except Exception:
                 if 'Shift Début' not in mp.columns: mp['Shift Début'] = ''
                 if 'Shift Fin' not in mp.columns: mp['Shift Fin'] = ''
+            mp = fill_from_medical(mp)
             mp['Source'] = 'Génération'
             gen_part = mp
 
@@ -681,9 +711,8 @@ def build_planning_genere(week_name=None, only_generated=False):
             mask_r = r['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie']) & r['Date Visite'].notna()
             if mask_r.any():
                 rp = r[mask_r].copy()
-                if not gen_part.empty:
-                    pid_map = dict(zip(gen_part['WORKDAY ID'], gen_part['Payroll ID'].astype(str)))
-                    rp['Payroll ID'] = rp['WORKDAY ID'].map(pid_map).fillna('')
+                # ★ Statut / Date d'embauche / Ancienneté / Payroll ID récupérés depuis la liste médicale
+                rp = fill_from_medical(rp)
                 try:
                     rp = enrich_shifts(rp, app_state.get('plannings', {}))
                 except Exception:
@@ -709,24 +738,15 @@ def build_planning_genere(week_name=None, only_generated=False):
 
     if combined.empty:
         return pd.DataFrame(columns=DISPLAY_COLS)
-    # ★ Remplissage systématique du Payroll ID depuis la liste médicale
-    med_all = app_state.get('medical_list')
-    if med_all is not None and not med_all.empty:
-        m2 = med_all.copy()
-        m2['WORKDAY ID'] = norm_id_series(m2['WORKDAY ID'])
-        if 'Payroll ID' in m2.columns:
-            pid_full = dict(zip(m2['WORKDAY ID'], m2['Payroll ID'].fillna('').astype(str)))
-            if not combined.empty:
-                cur = combined['Payroll ID'].fillna('').astype(str).str.strip()
-                better = combined['WORKDAY ID'].map(pid_full).fillna('').astype(str).str.strip()
-                combined['Payroll ID'] = [b if not c else c for c, b in zip(cur, better)]
+
     combined['Date Visite'] = pd.to_datetime(combined['Date Visite'], errors='coerce')
     combined = combined.sort_values(['Date Visite', 'Nom'], na_position='last')
     combined['Date Visite'] = combined['Date Visite'].dt.strftime('%d/%m/%Y').fillna('')
     combined['Créneau Visite'] = pd.to_datetime(combined['Créneau Visite'], errors='coerce').dt.strftime('%H:%M').fillna('')
+    combined['Date d\'embauche'] = pd.to_datetime(combined['Date d\'embauche'], errors='coerce', dayfirst=True).dt.strftime('%d/%m/%Y').fillna('')
     for c in ['Shift Début', 'Shift Fin']:
         if c not in combined.columns: combined[c] = ''
-    for c in ['Payroll ID', 'Nom', 'Prénom', 'Projet', 'Statut Visite']:
+    for c in DISPLAY_COLS:
         if c not in combined.columns: combined[c] = ''
     return combined[DISPLAY_COLS]
 
