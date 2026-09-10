@@ -1341,19 +1341,41 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-        # ★ Chart 2 par Date ET Projet (permet le filtrage par projet côté front)
-        date_df = med_df[med_df['Date Visite'].notna()].copy()
-        date_df['DateDT'] = date_df['Date Visite']
-        chart2_df = date_df.groupby(['DateDT', 'Projet_Affichage']).agg(
-            Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
-            Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum())
-        ).reset_index().sort_values('DateDT')
-        for _, row in chart2_df.iterrows():
+        # ★ Chart 2 : Planifiés = vue fusionnée (Génération + Suivi), Effectuées = RTA (commentaire ok)
+        try:
+            planned_view = await asyncio.to_thread(build_planning_genere, None, False)
+        except Exception:
+            planned_view = pd.DataFrame(columns=['Date Visite', 'Projet'])
+
+        plan_series = pd.Series(dtype=int)
+        if not planned_view.empty and 'Date Visite' in planned_view.columns:
+            pv = planned_view.copy()
+            pv['DateDT'] = pd.to_datetime(pv['Date Visite'], errors='coerce', dayfirst=True)
+            pv = pv[pv['DateDT'].notna()]
+            if 'Projet' not in pv.columns: pv['Projet'] = 'N/A'
+            # Respect du filtre de date du dashboard
+            if start_date:
+                pv = pv[pv['DateDT'] >= pd.to_datetime(start_date)]
+            if end_date:
+                pv = pv[pv['DateDT'] <= pd.to_datetime(end_date)]
+            if not pv.empty:
+                plan_series = pv.groupby([pv['DateDT'].dt.date, pv['Projet'].astype(str)]).size()
+
+        # Effectuées depuis le RTA (commentaire contient ok)
+        date_df2 = med_df[med_df['Date Visite'].notna()].copy()
+        fait_mask = date_df2['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
+        fait_series = date_df2[fait_mask].groupby(
+            [date_df2['Date Visite'].dt.date, 'Projet_Affichage']
+        ).size()
+
+        all_keys = sorted(set(plan_series.index) | set(fait_series.index))
+        for key in all_keys:
+            d, proj = key
             chart2_data.append({
-                "date": row['DateDT'].strftime('%d/%m/%Y'),
-                "project": str(row['Projet_Affichage']),
-                "planifie": int(row['Planifie']),
-                "faite": int(row['Effectuee'])
+                "date": d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d),
+                "project": str(proj),
+                "planifie": int(plan_series.get(key, 0)),
+                "faite": int(fait_series.get(key, 0))
             })
 
     # Progression : Reste Planifié = Planifié - Effectuée
