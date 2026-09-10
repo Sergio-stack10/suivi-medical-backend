@@ -112,6 +112,27 @@ async def login(username: str = Form(...), password: str = Form(...)):
         return {"role": "viewer", "username": username}
     raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
+@app.get("/api/debug_suivi")
+async def debug_suivi():
+    """Diagnostic : compte EXACTEMENT ce que contient le fichier Suivi RTA par date."""
+    rta = app_state.get('rta_data')
+    if rta is None or rta.empty:
+        return {"message": "Aucun fichier RTA importé"}
+    df = rta.copy()
+    df['Date Visite'] = pd.to_datetime(df['Date Visite'], errors='coerce')
+    out = []
+    for jour, sub in df[df['Date Visite'].notna()].groupby(df['Date Visite'].dt.normalize()):
+        statuts = sub['Statut Visite'].astype(str).str.strip().str.lower().value_counts().to_dict()
+        out.append({
+            "date": jour.strftime('%d/%m/%Y'),
+            "total_lignes": int(len(sub)),
+            "planifie_statut": int((sub['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié').sum()),
+            "effectuee_ok": int(sub['Commentaire'].astype(str).str.lower().str.contains('ok', na=False).sum()),
+            "statuts_reels": {k: int(v) for k, v in statuts.items()}
+        })
+    out.sort(key=lambda x: x['date'])
+    return out
+
 
 # ==========================================================
 # LECTURE EXCEL ROBUSTE (multi-moteurs + diagnostic)
