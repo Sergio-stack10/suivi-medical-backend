@@ -1263,7 +1263,7 @@ def build_chart4():
 
 @app.get("/api/dashboard")
 async def get_dashboard(start_date: str = None, end_date: str = None):
-    # Chart 4 : indépendant du RTA et du filtre de date
+    # ★ Chart 4 : indépendant du RTA et du filtre de date
     chart4_data = await asyncio.to_thread(build_chart4)
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
@@ -1314,8 +1314,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
-    # ★ Les visites effectuées font partie des planifiées (progression),
-    #   on ne les compte donc pas deux fois.
+    # Les effectuées font partie des planifiées (progression) -> pas de double comptage
     reste_a_planifier = max(0, total_a_passer - total_planifie)
 
     metrics = {
@@ -1329,6 +1328,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     chart1_data = []
     chart2_data = []
     if not med_df_full.empty:
+        # Chart 1 par projet : Total (full) vs Effectuée (filtré)
         counts_full = med_df_full.groupby(['Projet_Affichage']).size().reset_index(name='Total')
         counts_eff = med_df.groupby(['Projet_Affichage']).agg(
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum())
@@ -1341,9 +1341,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-        date_df = med_df[med_df['Date Visite'].notna()].copy()
-        date_df['DateDT'] = date_df['Date Visite']
-        # ★ Chart 2 par Date ET Projet (pour filtrage par projet côté front)
+        # ★ Chart 2 par Date ET Projet (permet le filtrage par projet côté front)
         date_df = med_df[med_df['Date Visite'].notna()].copy()
         date_df['DateDT'] = date_df['Date Visite']
         chart2_df = date_df.groupby(['DateDT', 'Projet_Affichage']).agg(
@@ -1358,7 +1356,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-    # ★ Progression : Effectuée ⊂ Planifié → Reste Planifié = Planifié - Effectuée
+    # Progression : Reste Planifié = Planifié - Effectuée
     chart3_data = {"effectuee": total_fait,
                    "reste": max(0, total_planifie - total_fait),
                    "non_planifie": reste_a_planifier}
@@ -1394,7 +1392,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "chart4": chart4_data,
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
-
 # ==========================================================
 # EXPORT
 # ==========================================================
