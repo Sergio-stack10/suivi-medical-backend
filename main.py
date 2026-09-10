@@ -1343,13 +1343,17 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
         date_df = med_df[med_df['Date Visite'].notna()].copy()
         date_df['DateDT'] = date_df['Date Visite']
-        chart2_df = date_df.groupby('DateDT').agg(
+        # ★ Chart 2 par Date ET Projet (pour filtrage par projet côté front)
+        date_df = med_df[med_df['Date Visite'].notna()].copy()
+        date_df['DateDT'] = date_df['Date Visite']
+        chart2_df = date_df.groupby(['DateDT', 'Projet_Affichage']).agg(
             Planifie=('Statut Visite', lambda x: (x.str.strip().str.lower() == 'planifié').sum()),
             Effectuee=('Commentaire', lambda x: x.str.lower().str.contains('ok', na=False).sum())
         ).reset_index().sort_values('DateDT')
         for _, row in chart2_df.iterrows():
             chart2_data.append({
                 "date": row['DateDT'].strftime('%d/%m/%Y'),
+                "project": str(row['Projet_Affichage']),
                 "planifie": int(row['Planifie']),
                 "faite": int(row['Effectuee'])
             })
