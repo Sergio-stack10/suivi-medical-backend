@@ -584,11 +584,76 @@ async function loadDashboard() {
             Plotly.newPlot(chart2Div, [t1, t2], layout2);
         } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // Chart 3
+        // ★ Chart 3 : Avancement Global — visuel fidèle à l'ancien outil
+        //   (Effectuée hachurée + Total Planifié = effectuée + à venir)
         const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
-        if (c3.effectuee + c3.reste + c3.non_planifie > 0) {
-            const data3 = [{ values: [c3.effectuee, c3.reste, c3.non_planifie], labels: ['Visite effectuée', 'Reste Planifié', 'Non Planifié'], type: 'pie', hole: 0.6, marker: { colors: ['#25E2CC', '#003D5B', '#747474'] }, textinfo: 'label+percent', textposition: 'outside' }];
-            const layout3 = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' }, showlegend: false, margin: { t: 25, b: 15, l: 20, r: 20 } };
+        const totalRef3 = c3.effectuee + c3.reste + c3.non_planifie;
+        if (totalRef3 > 0) {
+            const pctFait = (c3.effectuee / totalRef3 * 100).toFixed(1).replace('.', ',');
+            const totalPlanifie3 = c3.effectuee + c3.reste;
+            const pctPlanif = (totalPlanifie3 / totalRef3 * 100).toFixed(1).replace('.', ',');
+
+            const values3 = [], labels3 = [], texts3 = [], colors3 = [], pulls3 = [];
+            const shapes3 = [], fg3 = [], bg3 = [];
+
+            if (c3.effectuee > 0) {
+                values3.push(c3.effectuee);
+                labels3.push('Visite effectuée');
+                texts3.push(`Visite effectuée<br>${c3.effectuee} (${pctFait}%)`);
+                colors3.push('#003D5B');
+                pulls3.push(0.05);
+                shapes3.push('/');
+                fg3.push('#25E2CC');
+                bg3.push('#003D5B');
+            }
+            if (c3.reste > 0) {
+                values3.push(c3.reste);
+                labels3.push('Total Planifié');
+                // L'étiquette affiche le TOTAL planifié (effectuée + à venir), comme l'ancien outil
+                texts3.push(`Total Planifié<br>${totalPlanifie3} (${pctPlanif}%)`);
+                colors3.push('#003D5B');
+                pulls3.push(0.05);
+                shapes3.push('');
+                fg3.push('');
+                bg3.push('');
+            }
+            if (c3.non_planifie > 0) {
+                values3.push(c3.non_planifie);
+                labels3.push('Non Planifié');
+                texts3.push('');   // ancien outil : pas d'étiquette sur le gris (info au survol). Mettre `Non Planifié<br>${c3.non_planifie}` pour l'afficher.
+                colors3.push('#747474');
+                pulls3.push(0);
+                shapes3.push('');
+                fg3.push('');
+                bg3.push('');
+            }
+
+            const data3 = [{
+                values: values3,
+                labels: labels3,
+                type: 'pie',
+                hole: 0.6,
+                sort: false,
+                rotation: 0,
+                direction: 'clockwise',
+                text: texts3,
+                textinfo: 'text',
+                textposition: 'outside',
+                outsidetextfont: { size: 12 },
+                pull: pulls3,
+                insidetextorientation: 'radial',
+                marker: {
+                    colors: colors3,
+                    pattern: { shape: shapes3, fillmode: 'overlay', fgcolor: fg3, bgcolor: bg3, size: 8 }
+                },
+                hoverinfo: 'label+value+percent'
+            }];
+            const layout3 = {
+                paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#003D5B' },
+                showlegend: false,
+                margin: { t: 25, b: 15, l: 20, r: 20 }
+            };
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
