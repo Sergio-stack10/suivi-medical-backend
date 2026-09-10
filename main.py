@@ -1314,7 +1314,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
-    # Les effectuées font partie des planifiées (progression) -> pas de double comptage
+    # Effectuées ⊂ Planifiées (progression) -> pas de double comptage
     reste_a_planifier = max(0, total_a_passer - total_planifie)
 
     metrics = {
@@ -1341,41 +1341,22 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-        # ★ Chart 2 : Planifiés = vue fusionnée (Génération + Suivi), Effectuées = RTA (commentaire ok)
-        try:
-            planned_view = await asyncio.to_thread(build_planning_genere, None, False)
-        except Exception:
-            planned_view = pd.DataFrame(columns=['Date Visite', 'Projet'])
-
-        plan_series = pd.Series(dtype=int)
-        if not planned_view.empty and 'Date Visite' in planned_view.columns:
-            pv = planned_view.copy()
-            pv['DateDT'] = pd.to_datetime(pv['Date Visite'], errors='coerce', dayfirst=True)
-            pv = pv[pv['DateDT'].notna()]
-            if 'Projet' not in pv.columns: pv['Projet'] = 'N/A'
-            # Respect du filtre de date du dashboard
-            if start_date:
-                pv = pv[pv['DateDT'] >= pd.to_datetime(start_date)]
-            if end_date:
-                pv = pv[pv['DateDT'] <= pd.to_datetime(end_date)]
-            if not pv.empty:
-                plan_series = pv.groupby([pv['DateDT'].dt.date, pv['Projet'].astype(str)]).size()
-
-        # Effectuées depuis le RTA (commentaire contient ok)
+        # ★ Chart 2 — source : fichier Suivi RTA (page 5) uniquement
+        #   Axe X : Date Visite | Filtre : Projet | Planifié : Statut Visite | Effectuée : Commentaire
         date_df2 = med_df[med_df['Date Visite'].notna()].copy()
-        fait_mask = date_df2['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
-        fait_series = date_df2[fait_mask].groupby(
-            [date_df2['Date Visite'].dt.date, 'Projet_Affichage']
-        ).size()
+        date_df2['_Jour'] = date_df2['Date Visite'].dt.normalize()
 
-        all_keys = sorted(set(plan_series.index) | set(fait_series.index))
-        for key in all_keys:
-            d, proj = key
+        chart2_agg = date_df2.groupby(['_Jour', 'Projet_Affichage']).agg(
+            Planifie=('Statut Visite', lambda x: (x.astype(str).str.strip().str.lower() == 'planifié').sum()),
+            Effectuee=('Commentaire', lambda x: x.astype(str).str.lower().str.contains('ok', na=False).sum())
+        ).reset_index().sort_values('_Jour')
+
+        for _, row in chart2_agg.iterrows():
             chart2_data.append({
-                "date": d.strftime('%d/%m/%Y') if hasattr(d, 'strftime') else str(d),
-                "project": str(proj),
-                "planifie": int(plan_series.get(key, 0)),
-                "faite": int(fait_series.get(key, 0))
+                "date": row['_Jour'].strftime('%d/%m/%Y'),
+                "project": str(row['Projet_Affichage']),
+                "planifie": int(row['Planifie']),
+                "faite": int(row['Effectuee'])
             })
 
     # Progression : Reste Planifié = Planifié - Effectuée
@@ -1414,6 +1395,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "chart4": chart4_data,
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
+
 # ==========================================================
 # EXPORT
 # ==========================================================
