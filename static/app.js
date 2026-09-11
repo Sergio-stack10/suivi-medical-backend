@@ -173,9 +173,9 @@ document.getElementById('modalConfirmBtn').addEventListener('click', async () =>
         if (deleteTarget === 'suivi') {
             renderDynamicTable([], 'p5_table_body');
             clearCache(['p5', 'p6', 'p7']);
-            loadGenerated(); loadGeneratedWeek();
+            loadGenerated(); loadGeneratedWeek(); loadNonEffectuees();
         }
-        if (deleteTarget === 'non_effectuees') { renderDynamicTable([], 'p6_table_body'); clearCache(['p6']); }
+        if (deleteTarget === 'non_effectuees') { renderDynamicTable([], 'p6_table_body'); }
 
         closeModal();
     } catch (e) {
@@ -233,9 +233,7 @@ async function uploadFiles(inputId, category, tbodyId, statusId) {
         if (category === 'collab') { clearCache(['p2', 'p3', 'p4']); loadCollab(); }
         if (category === 'suivi') {
             clearCache(['p5', 'p6', 'p7']);
-            loadSuivi(); loadGenerated(); loadGeneratedWeek();
-            loadNonEffectuees();
-            // Si l'utilisateur regarde le Dashboard pendant l'import -> rafraîchir aussi
+            loadSuivi(); loadGenerated(); loadGeneratedWeek(); loadNonEffectuees();
             const p7 = document.getElementById('page-p7');
             if (p7 && p7.classList.contains('active')) loadDashboard();
         }
@@ -495,7 +493,7 @@ async function loadGeneratedWeek() {
 }
 
 async function unplanAll() {
-    if (confirm('Effacer UNIQUEMENT les planifications générées par l\'outil ?\n\n(Les lignes \'Planifié\' du fichier Suivi RTA ne sont pas touchées)')) {
+    if (confirm('Effacer UNIQUEMENT les planifications générées par l\'outil ?\n\n(Les planifications importées et celles du Suivi RTA sont conservées)')) {
         const res = await fetch('/api/unplan', { method: 'POST', headers: roleHeaders() });
         if (!res.ok) {
             let detail = "Erreur serveur";
@@ -527,7 +525,7 @@ async function loadNonEffectuees() {
 }
 
 // ==========================================
-// PAGE 7 : DASHBOARD (avec Chart 4)
+// PAGE 7 : DASHBOARD
 // ==========================================
 async function loadDashboard() {
     const metricsDiv = document.getElementById('p7_metrics');
@@ -571,21 +569,10 @@ async function loadDashboard() {
         populateProjFilter();
         filterChart1();
 
-        // Chart 2
-        const c2 = dashboardData.charts.chart2 || [];
-        if (c2.length > 0) {
-            const max2 = Math.max(...c2.map(d => d.planifie));
-            const layout = { paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: '#003D5B' } };
-            const faite_arr = c2.map(d => d.faite);
-            const date_order = c2.map(d => d.date);
-            const t1 = { x: c2.map(d => d.date), y: c2.map(d => d.planifie), type: 'bar', name: 'Planifié', marker: { color: '#003D5B' }, text: c2.map(d => d.planifie), textposition: 'outside', offsetgroup: '0' };
-            const t2 = { x: c2.map(d => d.date), y: faite_arr, type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: faite_arr, textposition: 'inside', offsetgroup: '0' };
-            const layout2 = { ...layout, barmode: 'overlay', xaxis: { categoryorder: 'array', categoryarray: date_order }, legend: { title: { text: 'Légende' } }, margin: { t: 30, b: 70 }, yaxis: { range: [0, max2 * 1.15] } };
-            Plotly.newPlot(chart2Div, [t1, t2], layout2);
-        } else { chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
+        // Chart 2 : Planifié vs Effectuée par date (fichier Suivi, sans filtre projet)
+        drawChart2();
 
         // ★ Chart 3 : Avancement Global — visuel fidèle à l'ancien outil
-        //   (Effectuée hachurée + Total Planifié = effectuée + à venir)
         const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
         const totalRef3 = c3.effectuee + c3.reste + c3.non_planifie;
         if (totalRef3 > 0) {
@@ -609,7 +596,6 @@ async function loadDashboard() {
             if (c3.reste > 0) {
                 values3.push(c3.reste);
                 labels3.push('Total Planifié');
-                // L'étiquette affiche le TOTAL planifié (effectuée + à venir), comme l'ancien outil
                 texts3.push(`Total Planifié<br>${totalPlanifie3} (${pctPlanif}%)`);
                 colors3.push('#003D5B');
                 pulls3.push(0.05);
@@ -620,7 +606,7 @@ async function loadDashboard() {
             if (c3.non_planifie > 0) {
                 values3.push(c3.non_planifie);
                 labels3.push('Non Planifié');
-                texts3.push('');   // ancien outil : pas d'étiquette sur le gris (info au survol). Mettre `Non Planifié<br>${c3.non_planifie}` pour l'afficher.
+                texts3.push('');
                 colors3.push('#747474');
                 pulls3.push(0);
                 shapes3.push('');
@@ -657,7 +643,7 @@ async function loadDashboard() {
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // ★ Chart 4 : non effectuées par ancienneté
+        // ★ Chart 4 : non effectuées par ancienneté (sans projet)
         filterChart4();
 
     } catch (e) {
@@ -760,11 +746,45 @@ function filterChart1() {
         const t1 = { x: filteredC1.map(d => d.project), y: filteredC1.map(d => d.total), type: 'bar', name: 'Total à passer', marker: { color: '#747474' }, text: filteredC1.map(d => d.total), textposition: 'outside', offsetgroup: '0' };
         const t3 = { x: filteredC1.map(d => d.project), y: filteredC1.map(d => d.faite), type: 'bar', name: 'Effectuée', marker: { color: '#25E2CC' }, text: filteredC1.map(d => d.faite), textposition: 'inside', offsetgroup: '0' };
 
-        const layout1 = { ...layout, barmode: 'overlay', legend: { title: { text: 'Légende' } }, margin: { t: 50, b: 100 }, yaxis: { range: [0, max1 * 1.15] } };
+        const layout1 = { ...layout, barmode: 'overlay', legend: { title: { text: 'Légende' } }, margin: { t: 30, b: 70 }, yaxis: { range: [0, max1 * 1.15] } };
         Plotly.newPlot(chart1Div, [t1, t3], layout1);
     } else {
         chart1Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée pour la sélection.</p>';
     }
+}
+
+// ==========================================
+// CHART 2 : Planifié vs Effectuée par date (fichier Suivi, sans filtre projet)
+// ==========================================
+function drawChart2() {
+    const chart2Div = document.getElementById('chart2_div');
+    if (!chart2Div) return;
+    const c2 = (dashboardData && dashboardData.charts.chart2) || [];
+
+    if (c2.length === 0) {
+        chart2Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>';
+        return;
+    }
+
+    const dates = c2.map(d => d.date);
+    const planifieArr = c2.map(d => d.planifie);
+    const faiteArr = c2.map(d => d.faite);
+    const max2 = Math.max(...planifieArr, 1);
+
+    const tPlan = { x: dates, y: planifieArr, type: 'bar', name: 'Planifié',
+                    marker: { color: '#003D5B' }, text: planifieArr, textposition: 'outside', width: 0.6 };
+    const tFait = { x: dates, y: faiteArr, type: 'bar', name: 'Effectuée',
+                    marker: { color: '#25E2CC' }, text: faiteArr, textposition: 'inside', width: 0.6 };
+
+    const layout2 = {
+        barmode: 'overlay',
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#003D5B' },
+        legend: { title: { text: 'Légende' } },
+        margin: { t: 30, b: 70 },
+        yaxis: { range: [0, max2 * 1.15] }
+    };
+    Plotly.newPlot(chart2Div, [tPlan, tFait], layout2);
 }
 
 // ==========================================
@@ -778,7 +798,6 @@ function filterChart4() {
     const chart4Div = document.getElementById('chart4_div');
     if (!chart4Div) return;
 
-    // Total par catégorie (toutes sources confondues)
     const byCat = {};
     CAT_ORDER.forEach(c => byCat[c] = 0);
     c4.forEach(d => { byCat[d.categorie] = (byCat[d.categorie] || 0) + d.count; });
