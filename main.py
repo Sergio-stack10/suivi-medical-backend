@@ -1240,7 +1240,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     if med_df.empty and total_a_passer > 0:
         return {
-            "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0%", "planifies_non_effectues": 0, "avg_planifie_jour": 0},
+            "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0%", "reste": total_a_passer, "avg_planifie_jour": 0},
             "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data,
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
@@ -1261,7 +1261,8 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
-    planifies_non_effectues = int((is_planifie & ~is_fait).sum())
+    # ★ Reste = Total à passer − Effectuées (données réelles du Suivi uniquement)
+    reste_visites = max(0, total_a_passer - total_fait)
     reste_a_planifier = max(0, total_a_passer - total_planifie)
 
     metrics = {
@@ -1269,7 +1270,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "total_planifie": total_planifie,
         "total_fait": total_fait,
         "reste_a_planifier": reste_a_planifier,
-        "planifies_non_effectues": planifies_non_effectues,
+        "reste": reste_visites,
         "avg_planifie_jour": 0,
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
