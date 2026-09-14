@@ -557,7 +557,7 @@ function updateEstimation() {
     if (jrEl) jrEl.innerText = jr;
     const moy = parseFloat(moyEl.value) || 0;
     const est = Math.round(totalFait + (moy * jr));
-    if (estEl) estEl.querySelector('h3').innerText = est.toLocaleString('fr-FR');
+    if (estEl) estEl.innerText = est.toLocaleString('fr-FR');
 }
 
 // ==========================================
