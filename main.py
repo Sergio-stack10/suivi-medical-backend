@@ -1257,7 +1257,10 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             med_df['Durée (min)'] = np.nan
 
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
-    is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False))
+    # ★ Planifié = statut contient 'planif' ET une Date Visite renseignée
+    #   (visite réellement programmée — aucune projection Due Date ici)
+    is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False)) \
+                  & med_df['Date Visite'].notna()
 
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
