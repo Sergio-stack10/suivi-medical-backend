@@ -1,6 +1,7 @@
 let deleteTarget = null;
 let pageCache = {};
 let dashboardData = null;
+let avgShowAll = false;
 
 // ==========================================
 // GESTION DU RÔLE
@@ -525,27 +526,86 @@ async function loadNonEffectuees() {
 }
 
 // ==========================================
+// DUE DATE & ESTIMATION FINALE
+// ==========================================
+function businessDaysRemaining(dueStr) {
+    if (!dueStr) return 0;
+    const due = new Date(dueStr + 'T00:00:00');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let count = 0;
+    const d = new Date(today);
+    d.setDate(d.getDate() + 1);
+    while (d <= due) {
+        const day = d.getDay();
+        if (day >= 1 && day <= 5) count++; // 5 jours sur 7 (lundi-vendredi)
+        d.setDate(d.getDate() + 1);
+    }
+    return count;
+}
+
+function updateEstimation() {
+    const m = (dashboardData && dashboardData.metrics) || {};
+    const totalFait = m.total_fait || 0;
+    const dueEl = document.getElementById('p7_due_date');
+    const moyEl = document.getElementById('p7_moyenne_jour');
+    const jrEl = document.getElementById('p7_jours_restants');
+    const estEl = document.getElementById('metric_estimation');
+    if (!dueEl || !moyEl) return;
+    localStorage.setItem('p7DueDate', dueEl.value || '');
+    localStorage.setItem('p7Moyenne', moyEl.value || '');
+    const jr = businessDaysRemaining(dueEl.value);
+    if (jrEl) jrEl.innerText = jr;
+    const moy = parseFloat(moyEl.value) || 0;
+    const est = Math.round(totalFait + (moy * jr));
+    if (estEl) estEl.querySelector('h3').innerText = est.toLocaleString('fr-FR');
+}
+
+// ==========================================
+// DURÉE MOYENNE : 5 jours visibles + déroulé
+// ==========================================
+function renderAvgTable() {
+    const body = document.getElementById('p7_avg_body');
+    const thead = document.querySelector('#p7_avg_table thead');
+    const data = (dashboardData && dashboardData.avg_duration) || [];
+    if (thead) thead.innerHTML = '<tr><th>Date</th><th>Durée Moyenne</th></tr>';
+    if (!body) return;
+    if (!data.length) {
+        body.innerHTML = '<tr><td class="empty-msg">Aucune donnée de durée.</td></tr>';
+        return;
+    }
+    const shown = avgShowAll ? data : data.slice(0, 5);
+    body.innerHTML = shown.map(r => `<tr><td>${r.Date}</td><td>${r['Durée Moyenne']}</td></tr>`).join('');
+    const btn = document.getElementById('p7_avg_toggle');
+    if (btn) {
+        if (data.length > 5) {
+            btn.style.display = '';
+            btn.innerText = avgShowAll ? '▲ Réduire' : `▼ Afficher les ${data.length - 5} jours suivants`;
+        } else {
+            btn.style.display = 'none';
+        }
+    }
+}
+
+function toggleAvg() {
+    avgShowAll = !avgShowAll;
+    renderAvgTable();
+}
+
+// ==========================================
 // PAGE 7 : DASHBOARD
 // ==========================================
 async function loadDashboard() {
     const metricsDiv = document.getElementById('p7_metrics');
-    const avgBody = document.getElementById('p7_avg_body');
-    const top5Body = document.getElementById('p7_top5_body');
     const doneBody = document.getElementById('p7_done_body');
     const chart1Div = document.getElementById('chart1_div');
     const chart2Div = document.getElementById('chart2_div');
     const chart3Div = document.getElementById('chart3_div');
     const chart4Div = document.getElementById('chart4_div');
 
-    const startDate = document.getElementById('p7_start_date') ? document.getElementById('p7_start_date').value : '';
-    const endDate = document.getElementById('p7_end_date') ? document.getElementById('p7_end_date').value : '';
-    let url = '/api/dashboard?';
-    if (startDate) url += `start_date=${startDate}&`;
-    if (endDate) url += `end_date=${endDate}&`;
+    avgShowAll = false;
+    let url = '/api/dashboard';
 
     metricsDiv.innerHTML = '<div class="metric-card"><div class="metric-info"><h3>Chargement...</h3></div></div>';
-    if (avgBody) avgBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
-    if (top5Body) top5Body.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
     if (doneBody) doneBody.innerHTML = '<tr><td class="empty-msg">Chargement...</td></tr>';
 
     try {
@@ -558,18 +618,29 @@ async function loadDashboard() {
             <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
             <div class="metric-card"><div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div><div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div></div>
             <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
-            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste_a_planifier || 0}</h3><p>Reste à planifier</p></div></div>
+            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.planifies_non_effectues || 0}</h3><p>Planifiés non effectués</p></div></div>
+            <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-bullseye"></i></div><div class="metric-info"><h3 id="metric_estimation">–</h3><p>Estimation finale</p></div></div>
         `;
 
-        renderDynamicTable(dashboardData.avg_duration || [], 'p7_avg_body');
-        renderDynamicTable(dashboardData.top5 || [], 'p7_top5_body');
+        renderAvgTable();
+        renderDynamicTable(dashboardData.top15 || [], 'p7_top5_body');
         renderDynamicTable(dashboardData.done_visites || [], 'p7_done_body');
+
+        // Due Date / Moyenne : valeurs persistées ou défaut = moyenne réelle du RTA
+        const dueEl = document.getElementById('p7_due_date');
+        const moyEl = document.getElementById('p7_moyenne_jour');
+        if (dueEl && !dueEl.value) dueEl.value = localStorage.getItem('p7DueDate') || '';
+        if (moyEl) {
+            const saved = localStorage.getItem('p7Moyenne');
+            moyEl.value = (saved !== null && saved !== '') ? saved : (m.avg_planifie_jour || 0);
+        }
+        updateEstimation();
 
         // Chart 1
         populateProjFilter();
         filterChart1();
 
-        // Chart 2 : Planifié vs Effectuée par date (fichier Suivi, sans filtre projet)
+        // Chart 2
         drawChart2();
 
         // ★ Chart 3 : Avancement Global — visuel fidèle à l'ancien outil
@@ -643,7 +714,7 @@ async function loadDashboard() {
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // ★ Chart 4 : non effectuées par ancienneté (sans projet)
+        // ★ Chart 4 : visites à réaliser par ancienneté
         filterChart4();
 
     } catch (e) {
@@ -754,7 +825,7 @@ function filterChart1() {
 }
 
 // ==========================================
-// CHART 2 : Planifié vs Effectuée par date (fichier Suivi, sans filtre projet)
+// CHART 2 : Planifié vs Effectuée par date (fichier Suivi)
 // ==========================================
 function drawChart2() {
     const chart2Div = document.getElementById('chart2_div');
@@ -788,7 +859,7 @@ function drawChart2() {
 }
 
 // ==========================================
-// GRAPHIQUE 4 : NON EFFECTUÉES PAR ANCIENNETÉ (sans projet)
+// GRAPHIQUE 4 : VISITES À RÉALISER PAR ANCIENNETÉ
 // ==========================================
 const CAT_ORDER = ['< 3 mois', '3 à 6 mois', '6 mois à 1 an', '> 1 an', 'Embauche inconnue'];
 
