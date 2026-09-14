@@ -1216,7 +1216,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     chart4_data = await asyncio.to_thread(build_chart4)
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
-        return {"metrics": {}, "avg_duration": [], "top5": [], "done_visites": [], "chart4": chart4_data, "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
+        return {"metrics": {}, "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data, "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
 
     med_df_full = rta_data.copy()
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
@@ -1227,8 +1227,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     if 'Date Visite' in med_df_full.columns and not pd.api.types.is_datetime64_any_dtype(med_df_full['Date Visite']):
         med_df_full['Date Visite'] = pd.to_datetime(med_df_full['Date Visite'], errors='coerce')
-    elif 'Date Visite' not in med_df_full.columns:
-        med_df_full['Date Visite'] = pd.NaT
 
     if 'Projet_Affichage' not in med_df_full.columns:
         if 'Projet' in med_df_full.columns: med_df_full['Projet_Affichage'] = med_df_full['Projet'].apply(get_mapped_project)
@@ -1242,8 +1240,8 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     if med_df.empty and total_a_passer > 0:
         return {
-            "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0.0%"},
-            "avg_duration": [], "top5": [], "done_visites": [], "chart4": chart4_data,
+            "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0%", "planifies_non_effectues": 0, "avg_planifie_jour": 0},
+            "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data,
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
 
@@ -1259,11 +1257,11 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             med_df['Durée (min)'] = np.nan
 
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
-    is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower() == 'planifié')
+    is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False))
 
     total_fait = len(med_df[is_fait])
     total_planifie = len(med_df[is_planifie])
-    # Effectuées ⊂ Planifiées (progression) -> pas de double comptage
+    planifies_non_effectues = int((is_planifie & ~is_fait).sum())
     reste_a_planifier = max(0, total_a_passer - total_planifie)
 
     metrics = {
@@ -1271,6 +1269,8 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         "total_planifie": total_planifie,
         "total_fait": total_fait,
         "reste_a_planifier": reste_a_planifier,
+        "planifies_non_effectues": planifies_non_effectues,
+        "avg_planifie_jour": 0,
         "pct_fait": f"{(total_fait/total_a_passer*100):.1f}%" if total_a_passer > 0 else "0%"
     }
 
@@ -1289,22 +1289,21 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-        # ★ Chart 2 — source : fichier Suivi RTA (page 5), sans dimension projet
-        #   Axe X : Date Visite | Planifié : Statut contient 'planif' | Effectuée : Commentaire contient 'ok'
+        # Chart 2 par date (fichier Suivi) + calcul de la moyenne planifiée/jour
         date_df2 = med_df[med_df['Date Visite'].notna()].copy()
         date_df2['_Jour'] = date_df2['Date Visite'].dt.normalize()
-
         chart2_agg = date_df2.groupby('_Jour').agg(
             Planifie=('Statut Visite', lambda x: x.astype(str).str.strip().str.lower().str.contains('planif', na=False).sum()),
             Effectuee=('Commentaire', lambda x: x.astype(str).str.lower().str.contains('ok', na=False).sum())
         ).reset_index().sort_values('_Jour')
-
         for _, row in chart2_agg.iterrows():
             chart2_data.append({
                 "date": row['_Jour'].strftime('%d/%m/%Y'),
                 "planifie": int(row['Planifie']),
                 "faite": int(row['Effectuee'])
             })
+        if not chart2_agg.empty:
+            metrics["avg_planifie_jour"] = round(float(chart2_agg['Planifie'].sum()) / len(chart2_agg), 1)
 
     chart3_data = {"effectuee": total_fait,
                    "reste": max(0, total_planifie - total_fait),
@@ -1318,14 +1317,15 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
 
-    top5_df = med_df.dropna(subset=['Durée (min)']).nlargest(5, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
-    top5 = []
-    if not top5_df.empty:
-        top5_df['Heure Départ'] = top5_df['Heure Départ'].dt.strftime('%H:%M')
-        top5_df['Heure Retour'] = top5_df['Heure Retour'].dt.strftime('%H:%M')
-        top5_df['Durée'] = top5_df['Durée (min)'].apply(format_duration)
-        top5_df['Nom Complet'] = top5_df['Nom'].astype(str) + ' ' + top5_df['Prénom'].astype(str)
-        top5 = clean_for_json(top5_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
+    # ★ Top 15
+    top15_df = med_df.dropna(subset=['Durée (min)']).nlargest(15, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
+    top15 = []
+    if not top15_df.empty:
+        top15_df['Heure Départ'] = top15_df['Heure Départ'].dt.strftime('%H:%M')
+        top15_df['Heure Retour'] = top15_df['Heure Retour'].dt.strftime('%H:%M')
+        top15_df['Durée'] = top15_df['Durée (min)'].apply(format_duration)
+        top15_df['Nom Complet'] = top15_df['Nom'].astype(str) + ' ' + top15_df['Prénom'].astype(str)
+        top15 = clean_for_json(top15_df[['WORKDAY ID', 'Nom Complet', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée']])
 
     done_df = med_df[med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     done_visites = []
@@ -1338,7 +1338,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         done_visites = clean_for_json(done_df[cols])
 
     return {
-        "metrics": metrics, "avg_duration": avg_duration, "top5": top5, "done_visites": done_visites, "chart4": chart4_data,
+        "metrics": metrics, "avg_duration": avg_duration, "top15": top15, "done_visites": done_visites, "chart4": chart4_data,
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
 
@@ -1382,6 +1382,24 @@ async def export_data(category: str):
         if rta_data is not None:
             df = rta_data[rta_data['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)].copy()
     elif category == 'generated': df = await asyncio.to_thread(build_planning_genere, None, False)
+    elif category == 'top15':
+        # ★ Export COMPLET du classement des durées (toutes les lignes, triées)
+        rta_data = app_state.get('rta_data')
+        if rta_data is not None and not rta_data.empty:
+            d = rta_data.copy()
+            d['Date Visite'] = pd.to_datetime(d.get('Date Visite'), errors='coerce')
+            if 'Heure Départ' in d.columns:
+                d['Heure Départ'] = pd.to_datetime(d['Heure Départ'].astype(str), errors='coerce')
+            if 'Heure Retour' in d.columns:
+                d['Heure Retour'] = pd.to_datetime(d['Heure Retour'].astype(str), errors='coerce')
+            dur = (d['Heure Retour'] - d['Heure Départ']).dt.total_seconds() / 60
+            d['Durée (min)'] = dur.where(dur >= 0)
+            if 'Projet' in d.columns:
+                d['Projet_Affichage'] = d['Projet'].apply(get_mapped_project)
+            cols = [c for c in ['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Durée (min)'] if c in d.columns]
+            df = d.dropna(subset=['Durée (min)']).sort_values('Durée (min)', ascending=False)[cols].copy()
+            if 'Date Visite' in df.columns:
+                df['Date Visite'] = df['Date Visite'].dt.strftime('%d/%m/%Y')
 
     if df is None or df.empty:
         return {"error": "Aucune donnée à exporter"}
@@ -1396,14 +1414,3 @@ async def export_data(category: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={category}.xlsx"}
     )
-
-# ==========================================================
-# LOGIN
-# ==========================================================
-@app.post("/api/login")
-async def login(username: str = Form(...), password: str = Form(...)):
-    if username in ADMIN_USERS and password == ADMIN_USERS[username]:
-        return {"role": "admin", "username": username}
-    if username in VIEWER_USERS and password == VIEWER_USERS[username]:
-        return {"role": "viewer", "username": username}
-    raise HTTPException(status_code=401, detail="Identifiants incorrects")
