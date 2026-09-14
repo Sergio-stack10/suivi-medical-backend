@@ -618,7 +618,7 @@ async function loadDashboard() {
             <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-users"></i></div><div class="metric-info"><h3>${m.total_a_passer || 0}</h3><p>Total à passer</p></div></div>
             <div class="metric-card"><div class="metric-icon orange"><i class="fas fa-calendar-check"></i></div><div class="metric-info"><h3>${m.total_planifie || 0}</h3><p>Planifiés</p></div></div>
             <div class="metric-card"><div class="metric-icon green"><i class="fas fa-check-circle"></i></div><div class="metric-info"><h3>${m.total_fait || 0} <span style="font-size:14px; color:#25E2CC;">(${m.pct_fait || '0%'})</span></h3><p>Visites effectuées</p></div></div>
-            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.planifies_non_effectues || 0}</h3><p>Planifiés non effectués</p></div></div>
+            <div class="metric-card"><div class="metric-icon red"><i class="fas fa-hourglass-half"></i></div><div class="metric-info"><h3>${m.reste || 0}</h3><p>Reste</p></div></div>
             <div class="metric-card"><div class="metric-icon blue"><i class="fas fa-bullseye"></i></div><div class="metric-info"><h3 id="metric_estimation">–</h3><p>Estimation finale</p></div></div>
         `;
 
