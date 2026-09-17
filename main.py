@@ -102,6 +102,14 @@ async def health():
         return {"mongo": "❌ NON CONNECTÉ — les données seront perdues à chaque redéploiement", "mode": "fichier local éphémère"}
     return {"mongo": "✅ Connecté — persistance garantie", "mode": "MongoDB"}
 
+@app.post("/api/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if username in ADMIN_USERS and password == ADMIN_USERS[username]:
+        return {"role": "admin", "username": username}
+    if username in VIEWER_USERS and password == VIEWER_USERS[username]:
+        return {"role": "viewer", "username": username}
+    raise HTTPException(status_code=401, detail="Identifiants incorrects")
+
 # ==========================================================
 # LECTURE EXCEL ROBUSTE (multi-moteurs + diagnostic)
 # ==========================================================
