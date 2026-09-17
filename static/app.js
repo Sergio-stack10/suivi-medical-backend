@@ -79,6 +79,7 @@ async function handleLogin() {
         const tab = document.getElementById('tab-' + startPage);
         switchPage(startPage, tab);
     } catch (e) {
+        errEl.innerText = "⚠️ Serveur injoignable — l'application est peut-être hors service.";
         errEl.style.display = 'block';
     }
 }
