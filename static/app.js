@@ -884,7 +884,7 @@ function drawChart2() {
 }
 
 // ==========================================
-// GRAPHIQUE 5 : PLANIFIÉES NON EFFECTUÉES PAR PROJET
+// GRAPHIQUE 5 : PLANIFIÉES vs NON EFFECTUÉES PAR PROJET
 // ==========================================
 function drawChart5() {
     const chart5Div = document.getElementById('chart5_div');
@@ -897,30 +897,30 @@ function drawChart5() {
     }
 
     // Tri croissant pour les barres horizontales (le plus grand en haut)
-    const sorted = [...c5].sort((a, b) => a.count - b.count);
+    const sorted = [...c5].sort((a, b) => b.non_ok - a.non_ok).reverse();
     const projects = sorted.map(d => d.project);
-    const counts = sorted.map(d => d.count);
-    const maxVal = Math.max(...counts);
+    const planifieArr = sorted.map(d => (d.planifie !== undefined) ? d.planifie : d.count);
+    const nonOkArr = sorted.map(d => d.non_ok || 0);
+    const maxVal = Math.max(...planifieArr, 1);
 
-    const trace = {
-        x: counts,
-        y: projects,
-        type: 'bar',
-        orientation: 'h',
-        marker: { color: '#FBCA18' },
-        text: counts,
-        textposition: 'outside',
-        cliponaxis: false
-    };
+    // Barre de fond : total planifié (passé) — barre de face : non effectuées
+    const tPlan = { x: planifieArr, y: projects, type: 'bar', orientation: 'h', name: 'Planifiées (passées)',
+                    marker: { color: '#747474' }, text: planifieArr, textposition: 'outside',
+                    cliponaxis: false, width: 0.6 };
+    const tNonOk = { x: nonOkArr, y: projects, type: 'bar', orientation: 'h', name: 'Non effectuées',
+                     marker: { color: '#FBCA18' }, text: nonOkArr, textposition: 'inside',
+                     cliponaxis: false, width: 0.6 };
 
     const layout5 = {
+        barmode: 'overlay',
         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#003D5B' },
         xaxis: { range: [0, maxVal * 1.15] },
         margin: { t: 25, b: 40, l: 150, r: 40 },
-        showlegend: false
+        showlegend: true,
+        legend: { title: { text: 'Légende' } }
     };
-    Plotly.newPlot(chart5Div, [trace], layout5);
+    Plotly.newPlot(chart5Div, [tPlan, tNonOk], layout5);
 }
 
 // ==========================================
