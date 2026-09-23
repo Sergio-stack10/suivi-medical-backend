@@ -889,7 +889,7 @@ function drawChart2() {
 function drawChart5() {
     const chart5Div = document.getElementById('chart5_div');
     if (!chart5Div) return;
-    const c5 = (dashboardData && dashboardData.chart5) || [];
+    const c5 = ((dashboardData && dashboardData.chart5) || []).filter(d => (d.non_ok || 0) > 0);
 
     if (c5.length === 0) {
         chart5Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune visite planifiée non effectuée 🎉</p>';
