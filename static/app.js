@@ -828,9 +828,7 @@ function filterChart1() {
     }
 }
 
-// ==========================================
-// CHART 2 : Planifié vs Effectuée par date (fichier Suivi)
-// ==========================================
+// Chart 2 : Planifié vs Effectuée par date (fichier Suivi) + info-bulle Non OK par projet
 function drawChart2() {
     const chart2Div = document.getElementById('chart2_div');
     if (!chart2Div) return;
@@ -846,10 +844,25 @@ function drawChart2() {
     const faiteArr = c2.map(d => d.faite);
     const max2 = Math.max(...planifieArr, 1);
 
+    // ★ Infos-bulles : Non OK total + détail par projet
+    const customData = c2.map(d => {
+        const nonOk = (d.non_ok !== undefined) ? d.non_ok : Math.max(0, (d.planifie || 0) - (d.faite || 0));
+        const det = d.non_ok_details || {};
+        const entries = Object.entries(det).sort((a, b) => b[1] - a[1]);
+        const detailsTxt = entries.length
+            ? entries.map(([p, n]) => `&nbsp;&nbsp;• ${p} : <b>${n}</b>`).join('<br>')
+            : 'Aucune visite non OK ✅';
+        return [d.planifie || 0, d.faite || 0, nonOk, detailsTxt];
+    });
+
     const tPlan = { x: dates, y: planifieArr, type: 'bar', name: 'Planifié',
-                    marker: { color: '#003D5B' }, text: planifieArr, textposition: 'outside', width: 0.6 };
+                    marker: { color: '#003D5B' }, text: planifieArr, textposition: 'outside', width: 0.6,
+                    customdata: customData,
+                    hovertemplate: '<b>%{x}</b><br>Planifié : %{customdata[0]}<br>Effectuée : %{customdata[1]}<br>Non OK : %{customdata[2]}<br><br><b>Non OK par projet :</b><br>%{customdata[3]}<extra></extra>' };
     const tFait = { x: dates, y: faiteArr, type: 'bar', name: 'Effectuée',
-                    marker: { color: '#25E2CC' }, text: faiteArr, textposition: 'inside', width: 0.6 };
+                    marker: { color: '#25E2CC' }, text: faiteArr, textposition: 'inside', width: 0.6,
+                    customdata: customData,
+                    hovertemplate: '<b>%{x}</b><br>Planifié : %{customdata[0]}<br>Effectuée : %{customdata[1]}<br>Non OK : %{customdata[2]}<br><br><b>Non OK par projet :</b><br>%{customdata[3]}<extra></extra>' };
 
     const layout2 = {
         barmode: 'overlay',
@@ -857,7 +870,8 @@ function drawChart2() {
         font: { color: '#003D5B' },
         legend: { title: { text: 'Légende' } },
         margin: { t: 30, b: 70 },
-        yaxis: { range: [0, max2 * 1.15] }
+        yaxis: { range: [0, max2 * 1.15] },
+        hoverlabel: { bgcolor: 'white', font: { color: '#003D5B', size: 12 } }
     };
     Plotly.newPlot(chart2Div, [tPlan, tFait], layout2);
 }
