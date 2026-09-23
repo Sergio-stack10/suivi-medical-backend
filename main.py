@@ -1327,6 +1327,21 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         if not chart2_agg.empty:
             metrics["avg_planifie_jour"] = round(float(chart2_agg['Planifie'].sum()) / len(chart2_agg), 1)
 
+    # ★ Chart 5 — Planifiées non effectuées par projet (Suivi uniquement)
+    #   Planifiées non effectuées = Statut contient 'planif' ET Commentaire ≠ OK
+    chart5_data = []
+    if not med_df.empty:
+        np_mask = med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False) & \
+                  (~med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False))
+        np_df = med_df[np_mask]
+        if not np_df.empty:
+            np_counts = np_df.groupby(['Projet_Affichage']).size().reset_index(name='count').sort_values('count', ascending=False)
+            for _, row in np_counts.iterrows():
+                chart5_data.append({
+                    "project": str(row['Projet_Affichage']),
+                    "count": int(row['count'])
+                })
+
     chart3_data = {"effectuee": total_fait,
                    "reste": max(0, total_planifie - total_fait),
                    "non_planifie": reste_a_planifier}
@@ -1360,7 +1375,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         done_visites = clean_for_json(done_df[cols])
 
     return {
-        "metrics": metrics, "avg_duration": avg_duration, "top15": top15, "done_visites": done_visites, "chart4": chart4_data,
+        "metrics": metrics, "avg_duration": avg_duration, "top15": top15, "done_visites": done_visites, "chart4": chart4_data, "chart5": chart5_data,
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
 
