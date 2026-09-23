@@ -940,6 +940,7 @@ function drawChart5() {
         legend: { title: { text: 'Légende' } }
     };
     Plotly.newPlot(chart5Div, [tPlan, tNonOk], layout5);
+}
 
 // ==========================================
 // GRAPHIQUE 6 : VISITES À RÉALISER PAR ANCIENNETÉ
