@@ -1347,7 +1347,8 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if not plan_df.empty:
         plan_counts = plan_df.groupby(['Projet_Affichage']).size()
         non_counts = plan_df[~ok_mask.loc[plan_df.index]].groupby(['Projet_Affichage']).size()
-        for proj in sorted(set(plan_counts.index)):
+        # ★ On n'affiche que les projets ayant AU MOINS 1 visite planifiée non effectuée
+        for proj in non_counts.index:
             chart5_data.append({
                 "project": str(proj),
                 "planifie": int(plan_counts.get(proj, 0)),
