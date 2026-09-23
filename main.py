@@ -1335,18 +1335,21 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             metrics["avg_planifie_jour"] = round(float(chart2_agg['Planifie'].sum()) / len(chart2_agg), 1)
 
     # ★ Chart 5 — Planifiées non effectuées par projet (Suivi uniquement)
-    #   Planifiées non effectuées = Statut contient 'planif' ET Commentaire ≠ OK
-    if not med_df.empty:
-        np_mask = med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False) & \
-                  (~med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False))
-        np_df = med_df[np_mask]
-        if not np_df.empty:
-            np_counts = np_df.groupby(['Projet_Affichage']).size().reset_index(name='count').sort_values('count', ascending=False)
-            for _, row in np_counts.iterrows():
-                chart5_data.append({
-                    "project": str(row['Projet_Affichage']),
-                    "count": int(row['count'])
-                })
+    #   Cohérence avec la page Non-effectuées : on ne compte que les visites
+    #   planifiées sur un jour STRICTEMENT ANTÉRIEUR à aujourd'hui (Aujourd'hui - 1)
+    #   et dont le Commentaire ne contient pas 'OK'.
+    today = pd.Timestamp(datetime.date.today())
+    np_mask = med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False) & \
+              (~med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)) & \
+              (med_df['Date Visite'] < today)
+    np_df = med_df[np_mask]
+    if not np_df.empty:
+        np_counts = np_df.groupby(['Projet_Affichage']).size().reset_index(name='count').sort_values('count', ascending=False)
+        for _, row in np_counts.iterrows():
+            chart5_data.append({
+                "project": str(row['Projet_Affichage']),
+                "count": int(row['count'])
+            })
 
     # Progression : Reste Planifié = Planifié - Effectuée
     chart3_data = {"effectuee": total_fait,
