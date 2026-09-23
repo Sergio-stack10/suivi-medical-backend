@@ -1301,18 +1301,28 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-        # Chart 2 par date (fichier Suivi) + calcul de la moyenne planifiée/jour
+        # Chart 2 par date (fichier Suivi) + détails "Non OK" par projet pour les infos-bulles
         date_df2 = med_df[med_df['Date Visite'].notna()].copy()
         date_df2['_Jour'] = date_df2['Date Visite'].dt.normalize()
         chart2_agg = date_df2.groupby('_Jour').agg(
             Planifie=('Statut Visite', lambda x: x.astype(str).str.strip().str.lower().str.contains('planif', na=False).sum()),
             Effectuee=('Commentaire', lambda x: x.astype(str).str.lower().str.contains('ok', na=False).sum())
         ).reset_index().sort_values('_Jour')
+
+        # ★ Détail des visites "Non OK" (planifiées mais commentaire ≠ OK) par projet
+        non_ok_mask = date_df2['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False) & \
+                      (~date_df2['Commentaire'].astype(str).str.lower().str.contains('ok', na=False))
+
         for _, row in chart2_agg.iterrows():
+            jour = row['_Jour']
+            sub = date_df2[(date_df2['_Jour'] == jour) & non_ok_mask]
+            details = sub.groupby(sub['Projet_Affichage'].astype(str)).size().sort_values(ascending=False).to_dict()
             chart2_data.append({
-                "date": row['_Jour'].strftime('%d/%m/%Y'),
+                "date": jour.strftime('%d/%m/%Y'),
                 "planifie": int(row['Planifie']),
-                "faite": int(row['Effectuee'])
+                "faite": int(row['Effectuee']),
+                "non_ok": int(sum(details.values())),
+                "non_ok_details": details
             })
         if not chart2_agg.empty:
             metrics["avg_planifie_jour"] = round(float(chart2_agg['Planifie'].sum()) / len(chart2_agg), 1)
