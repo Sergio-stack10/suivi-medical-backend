@@ -718,7 +718,10 @@ async function loadDashboard() {
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // Chart 4
+        // ★ Chart 5 : planifiées non effectuées par projet
+        drawChart5();
+
+        // Chart 4 (ancienneté)
         filterChart4();
 
     } catch (e) {
@@ -916,4 +919,43 @@ function filterChart4() {
         showlegend: false
     };
     Plotly.newPlot(chart4Div, [trace], layout4);
+// ==========================================
+// GRAPHIQUE 5 : PLANIFIÉES NON EFFECTUÉES PAR PROJET
+// ==========================================
+function drawChart5() {
+    const chart5Div = document.getElementById('chart5_div');
+    if (!chart5Div) return;
+    const c5 = (dashboardData && dashboardData.chart5) || [];
+
+    if (c5.length === 0) {
+        chart5Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune visite planifiée non effectuée 🎉</p>';
+        return;
+    }
+
+    // Tri croissant pour les barres horizontales (le plus grand en haut)
+    const sorted = [...c5].sort((a, b) => a.count - b.count);
+    const projects = sorted.map(d => d.project);
+    const counts = sorted.map(d => d.count);
+    const maxVal = Math.max(...counts);
+
+    const trace = {
+        x: counts,
+        y: projects,
+        type: 'bar',
+        orientation: 'h',
+        marker: { color: '#FBCA18' },
+        text: counts,
+        textposition: 'outside',
+        cliponaxis: false
+    };
+
+    const layout5 = {
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#003D5B' },
+        xaxis: { range: [0, maxVal * 1.15] },
+        margin: { t: 25, b: 40, l: 150, r: 40 },
+        showlegend: false
+    };
+    Plotly.newPlot(chart5Div, [trace], layout5);
+}
 }
