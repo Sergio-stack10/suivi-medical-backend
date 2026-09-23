@@ -904,11 +904,23 @@ function drawChart5() {
     const maxVal = Math.max(...planifieArr, 1);
 
     // Barre de fond : total planifié (passé) — barre de face : non effectuées
+    // ★ Étiquettes au format "Non effectuée/Planifié" (ex: AUC = 37/48)
+    const labelsArr = sorted.map(d => {
+        const p = (d.planifie !== undefined) ? d.planifie : d.count;
+        const no = d.non_ok || 0;
+        const pct = p > 0 ? Math.round(no / p * 100) : 0;
+        return `${no}/${p} (${pct}%)`;
+    });
+
     const tPlan = { x: planifieArr, y: projects, type: 'bar', orientation: 'h', name: 'Planifiées (passées)',
-                    marker: { color: '#747474' }, text: planifieArr, textposition: 'outside',
+                    marker: { color: '#747474' },
+                    customdata: labelsArr,
+                    hovertemplate: '<b>%{y}</b><br>Non effectuée/Planifié : %{customdata}<extra></extra>',
                     cliponaxis: false, width: 0.6 };
     const tNonOk = { x: nonOkArr, y: projects, type: 'bar', orientation: 'h', name: 'Non effectuées',
-                     marker: { color: '#FBCA18' }, text: nonOkArr, textposition: 'inside',
+                     marker: { color: '#FBCA18' },
+                     text: labelsArr,
+                     textposition: 'outside',
                      cliponaxis: false, width: 0.6 };
 
     const layout5 = {
