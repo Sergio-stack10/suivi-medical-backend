@@ -107,6 +107,7 @@ function toggleSidebar() {
         if (document.getElementById('chart2_div')) Plotly.Plots.resize('chart2_div');
         if (document.getElementById('chart3_div')) Plotly.Plots.resize('chart3_div');
         if (document.getElementById('chart4_div')) Plotly.Plots.resize('chart4_div');
+        if (document.getElementById('chart5_div')) Plotly.Plots.resize('chart5_div');
     }, 300);
 }
 
@@ -606,6 +607,7 @@ async function loadDashboard() {
     const chart2Div = document.getElementById('chart2_div');
     const chart3Div = document.getElementById('chart3_div');
     const chart4Div = document.getElementById('chart4_div');
+    const chart5Div = document.getElementById('chart5_div');
 
     avgShowAll = false;
     let url = '/api/dashboard';
@@ -647,7 +649,10 @@ async function loadDashboard() {
         // Chart 2
         drawChart2();
 
-        // ★ Chart 3 : Avancement Global
+        // ★ Chart 3 : Planifiées non effectuées par projet
+        drawChart5();
+
+        // ★ Chart 4 : Avancement Global (donut fidèle à l'ancien outil)
         const c3 = dashboardData.charts.chart3 || { effectuee: 0, reste: 0, non_planifie: 0 };
         const totalRef3 = c3.effectuee + c3.reste + c3.non_planifie;
         if (totalRef3 > 0) {
@@ -718,10 +723,7 @@ async function loadDashboard() {
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
 
-        // ★ Chart 5 : planifiées non effectuées par projet
-        drawChart5();
-
-        // Chart 4 (ancienneté)
+        // ★ Chart 5 : visites à réaliser par ancienneté
         filterChart4();
 
     } catch (e) {
@@ -831,7 +833,9 @@ function filterChart1() {
     }
 }
 
-// Chart 2 : Planifié vs Effectuée par date (fichier Suivi) + info-bulle Non OK par projet
+// ==========================================
+// CHART 2 : Planifié vs Effectuée par date + info-bulle Non OK par projet
+// ==========================================
 function drawChart2() {
     const chart2Div = document.getElementById('chart2_div');
     if (!chart2Div) return;
@@ -880,46 +884,6 @@ function drawChart2() {
 }
 
 // ==========================================
-// GRAPHIQUE 4 : VISITES À RÉALISER PAR ANCIENNETÉ
-// ==========================================
-const CAT_ORDER = ['< 3 mois', '3 à 6 mois', '6 mois à 1 an', '> 1 an', 'Embauche inconnue'];
-
-function filterChart4() {
-    if (!dashboardData) return;
-    const c4 = dashboardData.chart4 || [];
-    const chart4Div = document.getElementById('chart4_div');
-    if (!chart4Div) return;
-
-    const byCat = {};
-    CAT_ORDER.forEach(c => byCat[c] = 0);
-    c4.forEach(d => { byCat[d.categorie] = (byCat[d.categorie] || 0) + d.count; });
-    const cats = CAT_ORDER.filter(c => byCat[c] > 0);
-
-    if (cats.length === 0) {
-        chart4Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée. Importez la liste des Collaborateurs (source des dates d\'embauche).</p>';
-        return;
-    }
-
-    const trace = {
-        x: cats,
-        y: cats.map(c => byCat[c]),
-        type: 'bar',
-        marker: { color: '#003D5B' },
-        text: cats.map(c => byCat[c]),
-        textposition: 'outside',
-        width: 0.5
-    };
-
-    const maxVal = Math.max(...cats.map(c => byCat[c]));
-    const layout4 = {
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { color: '#003D5B' },
-        yaxis: { range: [0, maxVal * 1.15] },
-        margin: { t: 25, b: 45 },
-        showlegend: false
-    };
-    Plotly.newPlot(chart4Div, [trace], layout4);
-// ==========================================
 // GRAPHIQUE 5 : PLANIFIÉES NON EFFECTUÉES PAR PROJET
 // ==========================================
 function drawChart5() {
@@ -958,4 +922,45 @@ function drawChart5() {
     };
     Plotly.newPlot(chart5Div, [trace], layout5);
 }
+
+// ==========================================
+// GRAPHIQUE 6 : VISITES À RÉALISER PAR ANCIENNETÉ
+// ==========================================
+const CAT_ORDER = ['< 3 mois', '3 à 6 mois', '6 mois à 1 an', '> 1 an', 'Embauche inconnue'];
+
+function filterChart4() {
+    if (!dashboardData) return;
+    const c4 = dashboardData.chart4 || [];
+    const chart4Div = document.getElementById('chart4_div');
+    if (!chart4Div) return;
+
+    const byCat = {};
+    CAT_ORDER.forEach(c => byCat[c] = 0);
+    c4.forEach(d => { byCat[d.categorie] = (byCat[d.categorie] || 0) + d.count; });
+    const cats = CAT_ORDER.filter(c => byCat[c] > 0);
+
+    if (cats.length === 0) {
+        chart4Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée. Importez la liste des Collaborateurs (source des dates d\'embauche).</p>';
+        return;
+    }
+
+    const trace = {
+        x: cats,
+        y: cats.map(c => byCat[c]),
+        type: 'bar',
+        marker: { color: '#003D5B' },
+        text: cats.map(c => byCat[c]),
+        textposition: 'outside',
+        width: 0.5
+    };
+
+    const maxVal = Math.max(...cats.map(c => byCat[c]));
+    const layout4 = {
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#003D5B' },
+        yaxis: { range: [0, maxVal * 1.15] },
+        margin: { t: 25, b: 45 },
+        showlegend: false
+    };
+    Plotly.newPlot(chart4Div, [trace], layout4);
 }
