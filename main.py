@@ -43,6 +43,9 @@ def require_admin(request: Request):
     if request.headers.get("X-User-Role", "") != "admin":
         raise HTTPException(status_code=403, detail="🔒 Action réservée aux administrateurs.")
 
+# ==========================================================
+# PERSISTANCE (MongoDB + fallback fichier local)
+# ==========================================================
 def get_mongo_client():
     mongo_uri = os.environ.get("MONGO_URI")
     if not mongo_uri: return None
@@ -111,7 +114,7 @@ async def login(username: str = Form(...), password: str = Form(...)):
     raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
 # ==========================================================
-# LECTURE EXCEL ROBUSTE (multi-moteurs + diagnostic)
+# LECTURE EXCEL ROBUSTE
 # ==========================================================
 def get_excel_engine(filename: str):
     try:
@@ -1147,7 +1150,7 @@ def build_non_effectuees():
     statut_lower = df['Statut Visite'].astype(str).str.strip().str.lower()
     com_lower = df['Commentaire'].astype(str).str.lower()
     date_visite = pd.to_datetime(df['Date Visite'], errors='coerce')
-    is_planifie = (statut_lower == 'planifié')
+    is_planifie = statut_lower.str.contains('planif', na=False)
     is_ok = com_lower.str.contains('ok', na=False)
     is_passe = date_visite.notna() & (date_visite < today)
     non_eff = df[is_planifie & ~is_ok & is_passe].copy()
@@ -1176,8 +1179,6 @@ async def get_non_effectuees():
 # ==========================================================
 # CHART 4 : ANCIENNETÉ
 # ==========================================================
-CATEGORIES_ANCIENNETE = ['< 3 mois', '3 à 6 mois', '6 mois à 1 an', '> 1 an', 'Embauche inconnue']
-
 def build_chart4():
     """Collaborateurs n'ayant PAS encore effectué de visite, regroupés par ancienneté."""
     med_list = app_state.get('medical_list')
@@ -1224,7 +1225,9 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     chart4_data = await asyncio.to_thread(build_chart4)
     rta_data = app_state.get('rta_data')
     if rta_data is None or rta_data.empty:
-        return {"metrics": {}, "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data, "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
+        return {"metrics": {"total_a_passer": 0, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": 0, "reste": 0, "avg_planifie_jour": 0, "pct_fait": "0%"},
+                "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data, "chart5": [],
+                "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}}
 
     med_df_full = rta_data.copy()
     for col in ['Statut Visite', 'Commentaire', 'Projet', 'Date Visite', 'Heure Départ', 'Heure Retour', 'Nom', 'Prénom', 'WORKDAY ID']:
@@ -1235,6 +1238,8 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     if 'Date Visite' in med_df_full.columns and not pd.api.types.is_datetime64_any_dtype(med_df_full['Date Visite']):
         med_df_full['Date Visite'] = pd.to_datetime(med_df_full['Date Visite'], errors='coerce')
+    elif 'Date Visite' not in med_df_full.columns:
+        med_df_full['Date Visite'] = pd.NaT
 
     if 'Projet_Affichage' not in med_df_full.columns:
         if 'Projet' in med_df_full.columns: med_df_full['Projet_Affichage'] = med_df_full['Projet'].apply(get_mapped_project)
@@ -1249,7 +1254,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
     if med_df.empty and total_a_passer > 0:
         return {
             "metrics": {"total_a_passer": total_a_passer, "total_planifie": 0, "total_fait": 0, "reste_a_planifier": total_a_passer, "pct_fait": "0%", "reste": total_a_passer, "avg_planifie_jour": 0},
-            "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data,
+            "avg_duration": [], "top15": [], "done_visites": [], "chart4": chart4_data, "chart5": [],
             "charts": {"chart1": [], "chart2": [], "chart3": {"effectuee": 0, "reste": 0, "non_planifie": 0}}
         }
 
@@ -1265,8 +1270,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
             med_df['Durée (min)'] = np.nan
 
     is_fait = med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False)
-    # ★ Planifié = statut contient 'planif' ET une Date Visite renseignée
-    #   (visite réellement programmée — aucune projection Due Date ici)
     is_planifie = (med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False)) \
                   & med_df['Date Visite'].notna()
 
@@ -1288,6 +1291,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     chart1_data = []
     chart2_data = []
+    chart5_data = []
     if not med_df_full.empty:
         counts_full = med_df_full.groupby(['Projet_Affichage']).size().reset_index(name='Total')
         counts_eff = med_df.groupby(['Projet_Affichage']).agg(
@@ -1301,9 +1305,12 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                 "faite": int(row['Effectuee'])
             })
 
-        # Chart 2 par date (fichier Suivi) + détails "Non OK" par projet pour les infos-bulles
+        # ★ Chart 2 — source : fichier Suivi RTA (page 5)
+        #   Axe X : Date Visite | Planifié : Statut contient 'planif' | Effectuée : Commentaire contient 'ok'
+        #   + détails "Non OK" par projet pour les infos-bulles
         date_df2 = med_df[med_df['Date Visite'].notna()].copy()
         date_df2['_Jour'] = date_df2['Date Visite'].dt.normalize()
+
         chart2_agg = date_df2.groupby('_Jour').agg(
             Planifie=('Statut Visite', lambda x: x.astype(str).str.strip().str.lower().str.contains('planif', na=False).sum()),
             Effectuee=('Commentaire', lambda x: x.astype(str).str.lower().str.contains('ok', na=False).sum())
@@ -1329,7 +1336,6 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
 
     # ★ Chart 5 — Planifiées non effectuées par projet (Suivi uniquement)
     #   Planifiées non effectuées = Statut contient 'planif' ET Commentaire ≠ OK
-    chart5_data = []
     if not med_df.empty:
         np_mask = med_df['Statut Visite'].astype(str).str.strip().str.lower().str.contains('planif', na=False) & \
                   (~med_df['Commentaire'].astype(str).str.lower().str.contains('ok', na=False))
@@ -1342,6 +1348,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
                     "count": int(row['count'])
                 })
 
+    # Progression : Reste Planifié = Planifié - Effectuée
     chart3_data = {"effectuee": total_fait,
                    "reste": max(0, total_planifie - total_fait),
                    "non_planifie": reste_a_planifier}
@@ -1354,7 +1361,7 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         avg_df['Date'] = avg_df['Date'].astype(str)
         avg_duration = clean_for_json(avg_df[['Date', 'Durée Moyenne']])
 
-    # ★ Top 15
+    # Top 15
     top15_df = med_df.dropna(subset=['Durée (min)']).nlargest(15, 'Durée (min)')[['WORKDAY ID', 'Nom', 'Prénom', 'Projet_Affichage', 'Heure Départ', 'Heure Retour', 'Durée (min)']].copy()
     top15 = []
     if not top15_df.empty:
@@ -1375,12 +1382,13 @@ async def get_dashboard(start_date: str = None, end_date: str = None):
         done_visites = clean_for_json(done_df[cols])
 
     return {
-        "metrics": metrics, "avg_duration": avg_duration, "top15": top15, "done_visites": done_visites, "chart4": chart4_data, "chart5": chart5_data,
+        "metrics": metrics, "avg_duration": avg_duration, "top15": top15, "done_visites": done_visites,
+        "chart4": chart4_data, "chart5": chart5_data,
         "charts": {"chart1": chart1_data, "chart2": chart2_data, "chart3": chart3_data}
     }
 
 # ==========================================================
-# DIAGNOSTIC (à garder ou supprimer plus tard)
+# DIAGNOSTIC
 # ==========================================================
 @app.get("/api/debug_suivi")
 async def debug_suivi():
