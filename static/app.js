@@ -700,7 +700,7 @@ async function loadDashboard() {
                 text: texts3,
                 textinfo: 'text',
                 textposition: 'outside',
-                outsidetextfont: { size: 12 },
+                outsidetextfont: { size: 11 },
                 pull: pulls3,
                 insidetextorientation: 'radial',
                 marker: {
@@ -713,7 +713,7 @@ async function loadDashboard() {
                 paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
                 font: { color: '#003D5B' },
                 showlegend: false,
-                margin: { t: 25, b: 15, l: 20, r: 20 }
+                margin: { t: 25, b: 55, l: 30, r: 30 }
             };
             Plotly.newPlot(chart3Div, data3, layout3);
         } else { chart3Div.innerHTML = '<p style="text-align:center; color:#aaa; padding:40px;">Aucune donnée.</p>'; }
