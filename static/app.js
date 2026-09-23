@@ -912,28 +912,34 @@ function drawChart5() {
         return `${no}/${p} (${pct}%)`;
     });
 
+    // ★ Étiquette "Non effectuée/Planifié" portée par la barre GRISE (Planifiées),
+    //   positionnée OUTSIDE = à droite du bout de la barre de planifiés
     const tPlan = { x: planifieArr, y: projects, type: 'bar', orientation: 'h', name: 'Planifiées (passées)',
                     marker: { color: '#747474' },
+                    text: labelsArr,
+                    textposition: 'outside',
+                    textfont: { size: 12, color: '#003D5B' },
+                    cliponaxis: false,
+                    constraintext: 'none',
                     customdata: labelsArr,
                     hovertemplate: '<b>%{y}</b><br>Non effectuée/Planifié : %{customdata}<extra></extra>',
-                    cliponaxis: false, width: 0.6 };
+                    width: 0.6 };
     const tNonOk = { x: nonOkArr, y: projects, type: 'bar', orientation: 'h', name: 'Non effectuées',
                      marker: { color: '#FBCA18' },
-                     text: labelsArr,
-                     textposition: 'outside',
+                     customdata: labelsArr,
+                     hovertemplate: '<b>%{y}</b><br>Non effectuée/Planifié : %{customdata}<extra></extra>',
                      cliponaxis: false, width: 0.6 };
 
     const layout5 = {
         barmode: 'overlay',
         paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#003D5B' },
-        xaxis: { range: [0, maxVal * 1.15] },
-        margin: { t: 25, b: 40, l: 150, r: 40 },
+        xaxis: { range: [0, maxVal * 1.25], automargin: true },
+        margin: { t: 25, b: 40, l: 150, r: 90 },
         showlegend: true,
         legend: { title: { text: 'Légende' } }
     };
     Plotly.newPlot(chart5Div, [tPlan, tNonOk], layout5);
-}
 
 // ==========================================
 // GRAPHIQUE 6 : VISITES À RÉALISER PAR ANCIENNETÉ
