@@ -20,8 +20,25 @@
             <div class="auth-logo"><i class="fas fa-user-doctor"></i></div>
             <h1 class="auth-title">Suivi Visites Médicales</h1>
             <p class="auth-subtitle">Veuillez vous connecter pour accéder à l'application.</p>
-            <div class="input-group"><label for="loginUser">Nom d'utilisateur</label><div class="input-wrapper"><i class="fas fa-user"></i><input type="text" id="loginUser" placeholder="Utilisateur"></div></div>
-            <div class="input-group"><label for="loginPass">Mot de passe</label><div class="input-wrapper"><i class="fas fa-key"></i><input type="password" id="loginPass" placeholder="••••••••"></div></div>
+
+            <div class="auth-roles">
+                <label class="auth-role selected" id="roleCardViewer">
+                    <input type="radio" name="authRole" value="viewer" checked>
+                    <i class="fas fa-users"></i>
+                    <span class="role-txt"><b>Utilisateur</b><small>Consultation &amp; extraction</small></span>
+                </label>
+                <label class="auth-role" id="roleCardAdmin">
+                    <input type="radio" name="authRole" value="admin">
+                    <i class="fas fa-shield-halved"></i>
+                    <span class="role-txt"><b>Admin</b><small>Gestion complète</small></span>
+                </label>
+            </div>
+
+            <div class="input-group auth-pass-wrap" id="passGroup">
+                <label for="loginPass">Mot de passe</label>
+                <div class="input-wrapper"><i class="fas fa-key"></i><input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password"></div>
+            </div>
+
             <button id="loginBtn" class="auth-btn" onclick="handleLogin()">Se connecter</button>
             <div id="authError" class="auth-error">Identifiants incorrects.</div>
         </div>
