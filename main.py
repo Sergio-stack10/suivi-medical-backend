@@ -906,7 +906,8 @@ async def get_generated(week: str = None, source: str = None):
         return {"data": clean_for_json(df) if not df.empty else []}
     except Exception:
         print("ERREUR get_generated:", traceback.format_exc())
-        return {"data": []}
+        # ★ TEMPORAIRE : expose l'erreur pour diagnostic
+        return {"data": [], "debug_error": traceback.format_exc()[-800:]}
 
 @app.post("/api/unplan")
 async def unplan_all(request: Request):
