@@ -124,11 +124,16 @@ async def debug_medical():
     }
 
 @app.post("/api/login")
-async def login(username: str = Form(...), password: str = Form(...)):
-    if username in ADMIN_USERS and password == ADMIN_USERS[username]:
-        return {"role": "admin", "username": username}
-    if username in VIEWER_USERS and password == VIEWER_USERS[username]:
+async def login(username: str = Form(...), password: str = Form("")):
+    # Admin : mot de passe OBLIGATOIRE
+    if username in ADMIN_USERS:
+        if password and password == ADMIN_USERS[username]:
+            return {"role": "admin", "username": username}
+        raise HTTPException(status_code=401, detail="Mot de passe administrateur requis/incorrect")
+    # Viewer : connexion DIRECTE, sans mot de passe
+    if username in VIEWER_USERS:
         return {"role": "viewer", "username": username}
+    # Utilisateur inconnu : comportement identique à un admin raté (ne pas révéler l'existence des comptes)
     raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
 # ==========================================================
