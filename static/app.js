@@ -52,8 +52,29 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// ★ Bascule visuelle des cartes de rôle + affichage du mot de passe uniquement pour Admin
+function switchAuthRole(role) {
+    const cardViewer = document.getElementById('roleCardViewer');
+    const cardAdmin  = document.getElementById('roleCardAdmin');
+    const passGroup  = document.getElementById('passGroup');
+    if (!cardViewer || !cardAdmin) return;
+
+    cardViewer.classList.toggle('selected', role === 'viewer');
+    cardAdmin.classList.toggle('selected', role === 'admin');
+
+    // Mot de passe visible UNIQUEMENT pour Admin (dépliage animé)
+    if (passGroup) passGroup.classList.toggle('open', role === 'admin');
+    if (role !== 'admin') {
+        const passEl = document.getElementById('loginPass');
+        if (passEl) passEl.value = '';
+    }
+}
+
 async function handleLogin() {
-    const user = document.getElementById('loginUser').value.trim();
+    // ★ Rôle choisi via les cartes (Utilisateur / Admin)
+    const roleChoice = document.querySelector('input[name="authRole"]:checked');
+    const role = roleChoice ? roleChoice.value : 'viewer';
+    const user = (role === 'admin') ? 'wfm_admin' : (document.getElementById('loginUser').value.trim() || 'cnx_viewer');
     const pass = document.getElementById('loginPass') ? document.getElementById('loginPass').value : '';
     const errEl = document.getElementById('authError');
     errEl.style.display = 'none';
