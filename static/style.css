@@ -197,3 +197,124 @@ tr:hover { background: #f9f9f9; }
     min-height: 280px;
     height: 320px;
 }
+
+/* ==========================================================
+   ÉCRAN DE CONNEXION — Nouveau design
+   ========================================================== */
+#authOverlay {
+    background: linear-gradient(135deg, #031f2f 0%, #05405c 100%);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    padding: 16px;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 460px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-radius: 28px;
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.45);
+    padding: 38px 32px;
+    text-align: center;
+    color: #fff;
+}
+
+/* --- Logo --- */
+.auth-logo {
+    width: 92px; height: 92px;
+    border-radius: 26px;
+    background: #25e4cf;
+    color: #3b1a6b; /* violet foncé */
+    font-size: 40px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 22px;
+    box-shadow: 0 0 34px rgba(37, 228, 207, 0.55),
+                0 0 80px rgba(37, 228, 207, 0.25);
+}
+
+/* --- Titres --- */
+.auth-title { font-size: 30px; font-weight: 700; color: #fff; margin: 0 0 8px; line-height: 1.2; }
+.auth-subtitle { font-size: 14px; color: rgba(255,255,255,0.78); margin: 0 0 26px; }
+
+/* --- Cartes de rôle (radio habillées) --- */
+.auth-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+
+.auth-role {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 16px 10px;
+    border-radius: 18px;
+    border: 2px solid rgba(255,255,255,0.24);
+    background: rgba(255,255,255,0.10);
+    cursor: pointer;
+    transition: border-color .18s, background .18s, box-shadow .18s, transform .18s;
+}
+.auth-role:hover { transform: translateY(-2px); }
+.auth-role input { position: absolute; opacity: 0; pointer-events: none; }
+
+.auth-role i { font-size: 26px; color: #b89aff; }        /* icône violet clair */
+.auth-role .role-txt b { display: block; font-size: 14px; }
+.auth-role .role-txt small { display: block; font-size: 11px; color: rgba(255,255,255,0.65); margin-top: 3px; }
+
+/* Sélectionné */
+.auth-role.selected {
+    border-color: #25e4cf;
+    background: rgba(37, 228, 207, 0.12);
+    box-shadow: 0 0 20px rgba(37, 228, 207, 0.30);
+}
+.auth-role.selected i { color: #25e4cf; }
+
+/* --- Champ mot de passe (dépliage animé) --- */
+.auth-pass-wrap {
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    margin-bottom: 0;
+    transition: max-height .30s ease, opacity .25s ease, margin-bottom .30s ease;
+}
+.auth-pass-wrap.open {
+    max-height: 140px;
+    opacity: 1;
+    margin-bottom: 6px;
+}
+.auth-pass-wrap label { display: block; text-align: left; font-size: 12px; margin-bottom: 8px; font-weight: 600; color: rgba(255,255,255,0.85); }
+.auth-pass-wrap .input-wrapper { position: relative; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.20); border-radius: 12px; }
+.auth-pass-wrap .input-wrapper i { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.6); }
+.auth-pass-wrap input { width: 100%; padding: 14px 14px 14px 44px; background: transparent; border: none; color: #fff; font-size: 15px; outline: none; }
+.auth-pass-wrap input:focus { border-color: #25e4cf; }
+
+/* --- Bouton --- */
+.auth-btn {
+    width: 100%;
+    padding: 16px 0;
+    background: #25e4cf;
+    color: #03222f;
+    font-weight: 700; font-size: 16px;
+    border: none; border-radius: 14px;
+    cursor: pointer;
+    transition: filter .18s, transform .18s;
+}
+.auth-btn:hover { filter: brightness(1.08); transform: translateY(-2px); }
+.auth-btn:active { transform: translateY(0); }
+
+/* --- Erreur --- */
+.auth-error { color: #ff8080; font-size: 13px; margin-top: 14px; display: none; }
+
+/* --- Focus clavier visible --- */
+.auth-role:focus-within { outline: 2px solid #25e4cf; outline-offset: 3px; }
+.auth-btn:focus-visible, .auth-pass-wrap input:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+/* --- Mobile --- */
+@media (max-width: 520px) {
+    .auth-card { padding: 30px 20px; border-radius: 22px; }
+    .auth-logo { width: 76px; height: 76px; font-size: 32px; }
+    .auth-title { font-size: 24px; }
+    .auth-roles { grid-template-columns: 1fr; }
+}
+
+/* --- Réduction d'animations --- */
+@media (prefers-reduced-motion: reduce) {
+    .auth-role, .auth-btn, .auth-pass-wrap { transition: none !important; }
+    .auth-role:hover { transform: none; }
+}
