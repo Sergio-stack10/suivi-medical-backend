@@ -71,13 +71,19 @@ function switchAuthRole(role) {
 }
 
 async function handleLogin() {
+    const errEl = document.getElementById('authError');
+    if (errEl) errEl.style.display = 'none';
+
     // ★ Rôle choisi via les cartes (Utilisateur / Admin)
     const roleChoice = document.querySelector('input[name="authRole"]:checked');
     const role = roleChoice ? roleChoice.value : 'viewer';
-    const user = (role === 'admin') ? 'wfm_admin' : (document.getElementById('loginUser').value.trim() || 'cnx_viewer');
-    const pass = document.getElementById('loginPass') ? document.getElementById('loginPass').value : '';
-    const errEl = document.getElementById('authError');
-    errEl.style.display = 'none';
+
+    // Utilisateur = connexion directe (aucun identifiant à saisir)
+    // Admin = le serveur exigera le mot de passe saisi dans le champ déplié
+    const user = (role === 'admin') ? 'wfm_admin' : 'cnx_viewer';
+    const passEl = document.getElementById('loginPass');
+    const pass = passEl ? passEl.value : '';
+
     try {
         const fd = new FormData();
         fd.append('username', user);
@@ -86,8 +92,10 @@ async function handleLogin() {
         if (!res.ok) {
             let detail = "Identifiants incorrects.";
             try { detail = (await res.json()).detail || detail; } catch (e) {}
-            errEl.innerText = (res.status === 401) ? detail : "⚠️ Erreur serveur (" + res.status + ").";
-            errEl.style.display = 'block';
+            if (errEl) {
+                errEl.innerText = (res.status === 401) ? detail : "⚠️ Erreur serveur (" + res.status + ").";
+                errEl.style.display = 'block';
+            }
             return;
         }
         const data = await res.json();
@@ -104,10 +112,12 @@ async function handleLogin() {
         applyRoleUI();
         const startPage = data.role === 'admin' ? 'p1' : 'p2';
         const tab = document.getElementById('tab-' + startPage);
-        switchPage(startPage, tab);
+        if (tab) switchPage(startPage, tab);
     } catch (e) {
-        errEl.innerText = "⚠️ Serveur injoignable — l'application est peut-être hors service.";
-        errEl.style.display = 'block';
+        if (errEl) {
+            errEl.innerText = "⚠️ Serveur injoignable — l'application est peut-être hors service.";
+            errEl.style.display = 'block';
+        }
     }
 }
 
@@ -134,6 +144,13 @@ function handleLogout() {
     localStorage.removeItem('role');
     clearCache();
 }
+
+// ★ Brancher les cartes de rôle (clic -> bascule visuelle + affichage mdp si Admin)
+document.querySelectorAll('input[name="authRole"]').forEach(radio => {
+    radio.addEventListener('change', function () {
+        if (typeof switchAuthRole === 'function') switchAuthRole(this.value);
+    });
+});
 
 // ==========================================
 // LAYOUT & NAV
