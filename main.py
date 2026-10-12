@@ -663,17 +663,32 @@ def build_planning_genere(week_name=None, only_generated=False):
                 m2[col] = ''
         med_index = m2.drop_duplicates(subset=['WORKDAY ID']).set_index('WORKDAY ID')
 
+    def _safe_str(v):
+        """Convertit n'importe quoi (float NaN, Timestamp, None, str) en texte propre."""
+        if v is None:
+            return ''
+        try:
+            if pd.isna(v):
+                return ''
+        except Exception:
+            pass
+        s = str(v).strip()
+        if s.lower() in ('', 'nan', 'nat', 'none'):
+            return ''
+        return s
+
     def fill_from_medical(df):
+        """Complète les infos collaborateur depuis la liste médicale (sans écraser l'existant)."""
         if med_index is None or df.empty:
             return df
         for col in ['Payroll ID', 'Nom', 'Prénom', 'Statut', 'Date d\'embauche',
                     'Ancienneté', 'Projet', 'Priorité Visite']:
             if col in med_index.columns:
-                better = df['WORKDAY ID'].map(med_index[col].to_dict()).fillna('').astype(str).str.strip()
+                mapping = {k: _safe_str(v) for k, v in med_index[col].to_dict().items()}
+                better = df['WORKDAY ID'].map(mapping).fillna('').astype(str).str.strip()
                 if col in df.columns:
-                    cur = df[col].fillna('').astype(str).str.strip()
-                    df[col] = [b if (not c or c.lower() in ('nan', 'nat')) else c
-                               for c, b in zip(cur, better)]
+                    cur = df[col].map(_safe_str)
+                    df[col] = [b if not c else c for c, b in zip(cur, better)]
                 else:
                     df[col] = better
         return df
@@ -697,7 +712,10 @@ def build_planning_genere(week_name=None, only_generated=False):
             except Exception:
                 if 'Shift Début' not in mp.columns: mp['Shift Début'] = ''
                 if 'Shift Fin' not in mp.columns: mp['Shift Fin'] = ''
-            mp = fill_from_medical(mp)
+            try:
+                mp = fill_from_medical(mp)
+            except Exception:
+                print("WARN fill_from_medical (gen):", traceback.format_exc())
             gen_part = mp
 
     if not only_generated:
@@ -709,7 +727,10 @@ def build_planning_genere(week_name=None, only_generated=False):
             mask_r = r['Statut Visite'].astype(str).str.strip().str.lower().isin(['planifié', 'planifie']) & r['Date Visite'].notna()
             if mask_r.any():
                 rp = r[mask_r].copy()
-                rp = fill_from_medical(rp)
+                try:
+                    rp = fill_from_medical(rp)
+                except Exception:
+                    print("WARN fill_from_medical (rta):", traceback.format_exc())
                 try:
                     rp = enrich_shifts(rp, app_state.get('plannings', {}))
                 except Exception:
