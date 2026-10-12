@@ -105,6 +105,24 @@ async def health():
         return {"mongo": "❌ NON CONNECTÉ — les données seront perdues à chaque redéploiement", "mode": "fichier local éphémère"}
     return {"mongo": "✅ Connecté — persistance garantie", "mode": "MongoDB"}
 
+@app.get("/api/debug_medical")
+async def debug_medical():
+    """Diagnostic : état de la liste médicale (source du Planning généré)."""
+    med = app_state.get('medical_list')
+    if med is None or med.empty:
+        return {"medical_list": "VIDE ou None"}
+    ml = med.copy()
+    statuts = ml['Statut Visite'].astype(str).str.strip().value_counts().to_dict() if 'Statut Visite' in ml.columns else {}
+    dates_ok = int(pd.to_datetime(ml.get('Date Visite'), errors='coerce').notna().sum()) if 'Date Visite' in ml.columns else 0
+    sources = ml['Source Planification'].astype(str).value_counts().to_dict() if 'Source Planification' in ml.columns else {"colonne absente": 0}
+    return {
+        "total_lignes": int(len(ml)),
+        "statuts_visite": {k: int(v) for k, v in statuts.items()},
+        "lignes_avec_date": dates_ok,
+        "source_planification": {k: int(v) for k, v in sources.items()},
+        "colonnes": list(ml.columns)[:20]
+    }
+
 @app.post("/api/login")
 async def login(username: str = Form(...), password: str = Form(...)):
     if username in ADMIN_USERS and password == ADMIN_USERS[username]:
