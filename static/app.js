@@ -54,7 +54,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 async function handleLogin() {
     const user = document.getElementById('loginUser').value.trim();
-    const pass = document.getElementById('loginPass').value;
+    const pass = document.getElementById('loginPass') ? document.getElementById('loginPass').value : '';
     const errEl = document.getElementById('authError');
     errEl.style.display = 'none';
     try {
@@ -63,7 +63,9 @@ async function handleLogin() {
         fd.append('password', pass);
         const res = await fetch('/api/login', { method: 'POST', body: fd });
         if (!res.ok) {
-            errEl.innerText = (res.status === 401) ? "Identifiants incorrects." : "⚠️ Erreur serveur (" + res.status + ").";
+            let detail = "Identifiants incorrects.";
+            try { detail = (await res.json()).detail || detail; } catch (e) {}
+            errEl.innerText = (res.status === 401) ? detail : "⚠️ Erreur serveur (" + res.status + ").";
             errEl.style.display = 'block';
             return;
         }
@@ -85,6 +87,21 @@ async function handleLogin() {
     } catch (e) {
         errEl.innerText = "⚠️ Serveur injoignable — l'application est peut-être hors service.";
         errEl.style.display = 'block';
+    }
+}
+
+// ★ Adapte le formulaire selon l'utilisateur saisi :
+//    viewer connu -> mot de passe masqué + connexion directe ; admin/inconnu -> mot de passe exigé
+function adaptLoginForm() {
+    const user = document.getElementById('loginUser').value.trim();
+    const passGroup = document.getElementById('passGroup');
+    if (!passGroup) return;
+    const VIEWERS = ['cnx_viewer', 'concentrix']; // doit refléter VIEWER_USERS côté serveur
+    const isViewer = VIEWERS.includes(user);
+    passGroup.style.display = isViewer ? 'none' : '';
+    if (isViewer) {
+        const passEl = document.getElementById('loginPass');
+        if (passEl) passEl.value = ''; // sécurité : ne pas envoyer un vieux mot de passe
     }
 }
 
